@@ -1,0 +1,68 @@
+{
+  "source": "20f48cc7",
+  "native": "Codex0.159.0",
+  "network": "bwrap --unshare-net; loopback fixture provider only",
+  "provider_calls": 0,
+  "qa_runner": "378d0b43",
+  "negative_selection": {
+    "operator": "none",
+    "project": "none"
+  },
+  "report_sha256": "4fa1c9edd54249a3b0893accfba2a8a081b6f950a1c9e35aae598b220a39b2cf",
+  "source_codes": [
+    {
+      "origin": "operator",
+      "kind": "mcp",
+      "code": "disabled"
+    },
+    {
+      "origin": "project",
+      "kind": "mcp",
+      "code": "cannot_be_excluded"
+    },
+    {
+      "origin": "operator",
+      "kind": "subagents",
+      "code": "cannot_be_excluded"
+    },
+    {
+      "origin": "project",
+      "kind": "subagents",
+      "code": "cannot_be_excluded"
+    }
+  ],
+  "post_start_servers": {
+    "crew": true,
+    "operator-sentinel": false,
+    "project-sentinel": true
+  },
+  "children": [
+    {
+      "parent": "left",
+      "request": 12,
+      "sha256": "6fac05e3d931d4d040024ea41596247ebb620f143361c1f79baef767805e901e",
+      "role_paths": [
+        "/input/0/tools/2/tools/4/parameters/properties/agent_type/description"
+      ],
+      "operator_role_present": true,
+      "project_role_present": true,
+      "parent_receipt_line": 42
+    },
+    {
+      "parent": "roles",
+      "request": 15,
+      "sha256": "d33b02d8ce942810690cce26aac6fc49b42381338d3905c43f51546ee98df2de",
+      "role_paths": [
+        "/input/0/tools/2/tools/4/parameters/properties/agent_type/description"
+      ],
+      "operator_role_present": true,
+      "project_role_present": true,
+      "parent_receipt_line": 42
+    }
+  ],
+  "cleanup": {
+    "remaining_processes": [],
+    "stop_returncode": 0
+  },
+  "known_separate_issue": "codex-child-session-id: child notification still changes daemon parent session id on this base; native receipts matched original parent explicitly"
+}

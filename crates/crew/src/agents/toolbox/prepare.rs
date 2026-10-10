@@ -892,6 +892,98 @@ mod tests {
     }
 
     #[test]
+    fn codex_role_exclusions_report_the_code_mode_limit_and_refuse_strict() {
+        use crew_core::{ToolboxSourceCode, ToolboxSourceOrigin};
+        for origin in [ToolboxSourceOrigin::Operator, ToolboxSourceOrigin::Project] {
+            let temp = tempfile::tempdir().unwrap();
+            let mut ctx = context(temp.path(), RuntimeKind::Codex, "member");
+            ctx.preview = true;
+            let directory = if origin == ToolboxSourceOrigin::Operator {
+                ctx.operator.codex.clone()
+            } else {
+                ctx.workdir.join(".codex")
+            };
+            std::fs::create_dir_all(&directory).unwrap();
+            // The role is configured outside agents/, which may not exist.
+            std::fs::write(
+                directory.join("config.toml"),
+                "[agents]\nmax_threads=4\n[agents.external]\ndescription='External role'\nconfig_file='/fixture/role.toml'\n",
+            )
+            .unwrap();
+            for strict in [false, true] {
+                let mut resolved = Resolved {
+                    strict,
+                    ..Resolved::default()
+                };
+                resolved.sources.project.clear();
+                let plan = prepare(&ctx, resolved, None, |_| unreachable!()).unwrap();
+                let row = plan
+                    .view
+                    .sources
+                    .iter()
+                    .find(|row| row.origin == origin && row.kind.as_deref() == Some("subagents"))
+                    .unwrap();
+                assert_eq!(row.status.code, ToolboxSourceCode::CannotBeExcluded);
+                assert_eq!(row.names.len(), 1);
+                assert!(row.names[0].ends_with("config.toml: agents.external"));
+                assert_eq!(plan.stops.is_empty(), !strict);
+                assert!(plan
+                    .runtime
+                    .codex_overrides
+                    .contains(&("features.multi_agent".into(), json!(false))));
+            }
+            let mut inherited = Resolved::default();
+            if origin == ToolboxSourceOrigin::Operator {
+                inherited.sources.operator.insert(SourceKind::Subagents);
+            }
+            let plan = prepare(&ctx, inherited, None, |_| unreachable!()).unwrap();
+            assert!(plan.view.sources.iter().any(|row| {
+                row.origin == origin
+                    && row.kind.as_deref() == Some("subagents")
+                    && row.status.code == ToolboxSourceCode::Used
+            }));
+            cleanup(temp.path());
+        }
+    }
+
+    #[test]
+    fn codex_project_mcp_exclusion_is_not_promised_before_native_trust() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut ctx = context(temp.path(), RuntimeKind::Codex, "member");
+        ctx.preview = true;
+        std::fs::create_dir_all(ctx.workdir.join(".codex")).unwrap();
+        std::fs::write(
+            ctx.workdir.join(".codex/config.toml"),
+            "[mcp_servers.project]\ncommand='/bin/false'\n",
+        )
+        .unwrap();
+        for strict in [false, true] {
+            let resolved = Resolved {
+                strict,
+                ..Resolved::default()
+            };
+            let plan = prepare(&ctx, resolved, None, |_| unreachable!()).unwrap();
+            let row = plan
+                .view
+                .sources
+                .iter()
+                .find(|row| {
+                    row.origin == crew_core::ToolboxSourceOrigin::Project
+                        && row.kind.as_deref() == Some("mcp")
+                })
+                .unwrap();
+            assert_eq!(
+                row.status.code,
+                crew_core::ToolboxSourceCode::CannotBeExcluded
+            );
+            assert_eq!(row.names, ["project"]);
+            assert!(plan.runtime.codex_project_servers.contains("project"));
+            assert_eq!(plan.stops.is_empty(), !strict);
+        }
+        cleanup(temp.path());
+    }
+
+    #[test]
     fn subagent_restrictions_are_not_discarded_and_plugin_servers_are_explicit() {
         let temp = tempfile::tempdir().unwrap();
         let role = temp.path().join("role.md");

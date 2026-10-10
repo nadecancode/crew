@@ -7,6 +7,7 @@ specific binaries; otherwise the probes use PATH.
 
 ```sh
 node notes/toolbox-probes/codex-config.mjs
+node notes/toolbox-probes/codex-trust.mjs
 node notes/toolbox-probes/codex-server.mjs
 node notes/toolbox-probes/codex-request.mjs
 node notes/toolbox-probes/claude.mjs
@@ -30,6 +31,18 @@ request body, immediately returns a deliberate HTTP 400, and never forwards the
 request. Those captured CLI invocations should exit 1; a timeout or signal is
 not success. Header values are not recorded. Native system prompt captures stay
 in the ignored evidence directory, not in source control.
+
+`codex-trust.mjs` additionally requires Linux bubblewrap. It runs native MCP
+inventory in a network namespace before and after project trust, without
+starting a server or a model. It retains the four results under
+`target/toolbox-t12/codex-trust` (`TOOLBOX_OUT` can select another directory).
+On Codex 0.159.0 the untrusted project server is absent, then enabled after
+trust. A disabled-only override fails before trust because it lacks a
+transport, but works once the project table loads. This is why a prelaunch
+inventory cannot promise to exclude project servers across a later trust
+decision. T12's code-mode child regression lives in
+`scripts/toolboxes/discovery.py --runtime codex --case sources --child`
+from the toolbox QA runner at `378d0b43` and uses its isolated local provider.
 
 Each runner prints its observations and retains JSON/text evidence. Pi's
 observation extension reads the native system prompt and tool registry after

@@ -61,6 +61,8 @@ pub struct RuntimeToolbox {
     pub codex_overrides: Vec<(String, Value)>,
     pub codex_skill_roots: Vec<PathBuf>,
     pub codex_inherit_servers: BTreeSet<String>,
+    /// Project names also reserve collision space before Codex trusts the project.
+    pub codex_project_servers: BTreeSet<String>,
     pub pi_skills: Vec<PathBuf>,
     pub pi_extensions: Vec<PathBuf>,
     pub pi_approve: bool,
@@ -91,7 +93,7 @@ impl RuntimeToolbox {
 }
 
 /// Increment when a runtime mapping changes the generated toolbox semantics.
-pub const MAPPING_VERSION: u32 = 1;
+pub const MAPPING_VERSION: u32 = 2;
 
 /// What a member was started with. References remain references: credentials
 /// are resolved separately in the daemon and never enter this persisted value.

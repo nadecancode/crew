@@ -47,16 +47,26 @@ impl Daemon {
             anyhow::bail!("Codex MCP inventory failed; cannot apply toolbox source controls");
         }
         let names = crate::agents::codex::toolbox::inventory_names(&bytes)?;
-        if names.contains("crew") {
+        // An untrusted project's tables are absent from `mcp list`, but may
+        // merge into the same server after the TUI accepts project trust.
+        // Reserve their names without synthesizing invalid transport-less
+        // disabled entries before that layer is loaded.
+        let ambient: std::collections::BTreeSet<_> = names
+            .union(&toolbox.codex_project_servers)
+            .cloned()
+            .collect();
+        if ambient.contains("crew") {
             anyhow::bail!("Codex already configures MCP server 'crew'; rename that ambient entry before launching (Codex merges server fields)");
         }
         let mut collisions = std::collections::BTreeSet::new();
         let mut disabled = Vec::new();
-        for name in names {
+        for name in ambient {
             if toolbox.servers.contains(&name) {
                 collisions.insert(name.clone());
             }
-            if !toolbox.codex_inherit_servers.contains(&name) || collisions.contains(&name) {
+            if names.contains(&name)
+                && (!toolbox.codex_inherit_servers.contains(&name) || collisions.contains(&name))
+            {
                 disabled.push(name);
             }
         }
