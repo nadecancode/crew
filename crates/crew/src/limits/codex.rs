@@ -216,6 +216,16 @@ pub fn codex_last_turn(rollout: &str) -> Option<CodexTurnEnd> {
     Some(end)
 }
 
+/// Whether a Codex turn's error (`kind`, `message`: `CodexTurnEnd::error`)
+/// is its login no longer working: its kind says so, or what it said is a
+/// 401 or 403 (Codex 0.159 names "workspace routing discovery unauthorized
+/// (401)" only `other`; it runs into it when the account was switched under
+/// a running session). A content filter's refusal is never one.
+pub fn codex_signed_out(kind: &str, message: &str) -> bool {
+    !kind.ends_with("_policy")
+        && (kind == "unauthorized" || super::classify_error(message) == Some(LimitKind::Auth))
+}
+
 /// The session file Codex keeps for `thread`, started around `started_ms`:
 /// `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread>.jsonl`.
 pub fn codex_rollout_path(thread: &str, started_ms: i64) -> Option<std::path::PathBuf> {

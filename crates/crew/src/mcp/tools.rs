@@ -65,6 +65,18 @@ pub fn definitions() -> Vec<ToolDef> {
             true,
         ),
         tool(
+            "agent_peek",
+            "Where a teammate stands, without waking it: its status, what it is doing now and \
+for how long it has been quiet, and its open cards with their notes, results and commits. It \
+costs the teammate nothing, where a message asking it costs a turn over its whole \
+conversation; ask it only for what this does not show.",
+            object(
+                json!({ "id": { "type": "string", "description": "The teammate's id" } }),
+                &["id"],
+            ),
+            true,
+        ),
+        tool(
             "agent_send",
             "Send a message directly to one teammate. It is delivered straight into that agent's \
 session; the orchestrator is not involved. Use type \"question\" when you need an answer, \
@@ -76,6 +88,7 @@ nothing back (it does not wake a resting teammate unless that teammate is waitin
                     "body": { "type": "string", "description": "The message text" },
                     "type": { "type": "string", "enum": MESSAGE_TYPES, "default": "message" },
                     "reply_to": { "type": "string", "description": "Id of the message this answers" },
+                    "wait": { "type": "boolean", "description": "You wait for their answer: your status is set to waiting on them (your card parked) in the same call, with no agent_status after it" },
                 }),
                 &["to", "body"],
             ),
@@ -686,6 +699,31 @@ pub fn render_agents(agents: &[Agent]) -> String {
     out
 }
 
+/// One agent as `agent_peek` shows it: its line in `agents_list`, how long
+/// it has been quiet, and every card it holds that is not finished, in full.
+pub fn render_peek(agent: &Agent, tasks: &[Task], now: i64) -> String {
+    let mut out = render_agents(std::slice::from_ref(agent));
+    if agent.last_activity_at > 0 {
+        out.push_str(&format!(
+            "last active {} ago\n",
+            crew_core::util::fmt_elapsed((now - agent.last_activity_at).max(0))
+        ));
+    }
+    let cards: Vec<&Task> = tasks
+        .iter()
+        .filter(|t| {
+            t.assigned_agent.as_deref() == Some(agent.id.as_str()) && !t.status.is_terminal()
+        })
+        .collect();
+    if cards.is_empty() {
+        out.push_str("no open cards\n");
+    }
+    for card in cards {
+        render_task(&mut out, card);
+    }
+    out
+}
+
 /// Every card in full: status, assignee, dependencies, reviewer, note,
 /// result and artifacts.
 pub fn render_tasks(tasks: &[Task]) -> String {
@@ -919,6 +957,16 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
             let (agents, raw): (Vec<Agent>, _) = rpc(client, Call::AgentsList)?;
             out(render_agents(&agents), raw)
         }
+        "agent_peek" => {
+            let id = arg_str(args, "id")?;
+            let (agents, raw): (Vec<Agent>, _) = rpc(client, Call::AgentsList)?;
+            let agent = agents
+                .into_iter()
+                .find(|a| a.id == id)
+                .ok_or_else(|| format!("no agent '{id}'"))?;
+            let (tasks, _): (Vec<Task>, _) = rpc(client, Call::TasksList)?;
+            out(render_peek(&agent, &tasks, crew_core::util::now_ms()), raw)
+        }
         "agent_send" | "agent_broadcast" => {
             let recipients: Vec<String> = if name == "agent_broadcast" {
                 vec![BROADCAST.to_string()]
@@ -940,6 +988,7 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                 list
             };
             let several = recipients.len() > 1;
+            let waiting_on = recipients.join(", ");
             if several {
                 // All or none: a copy sent before a bad name would be sent
                 // again when the call is retried.
@@ -984,6 +1033,23 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
                     )
                 });
                 raws.push(raw);
+            }
+            // Parked in the same call: the message is out either way, so a
+            // card that cannot be parked is said, not an error (the send
+            // would be repeated).
+            if name == "agent_send" && args.get("wait").and_then(Value::as_bool) == Some(true) {
+                let parked: Result<(Agent, Value), CallError> = rpc(
+                    client,
+                    Call::StatusUpdate {
+                        status: AgentStatus::Waiting,
+                        note: Some(format!("waiting on {waiting_on}")),
+                        task_id: None,
+                    },
+                );
+                lines.push(match parked {
+                    Ok(_) => format!("You are waiting on {waiting_on} now."),
+                    Err(e) => format!("Your status was not set to waiting: {e}"),
+                });
             }
             let raw = if raws.len() == 1 {
                 raws.remove(0)

@@ -69,7 +69,9 @@ fn roster(view: &TeamView<'_>, me: &str) -> String {
 
 const TOOLS_COMMON: &str = "\
 - agents_list() — who is on the team, their role, status and current task.
-- agent_send(to, body, type?) — send a message straight to one teammate.
+- agent_peek(id) — where one teammate stands (status, what it is doing, its open cards), without \
+waking it.
+- agent_send(to, body, type?, wait?) — send a message straight to one teammate; wait: true also parks your card as waiting on them.
 - agent_broadcast(body) — tell every teammate at once.
 - agent_inbox(id?) — read your unread messages in full; with an id, that one message (one you \
 sent or received).
@@ -82,7 +84,7 @@ reviewer, where it stands. Without an id, your task in progress.";
 
 const TOOLS_WORKER: &str = "\
 - task_update(percent, message) — report progress on your current task at meaningful milestones.
-- agent_status(status, note, task_id?) — set your status: working, waiting (park a card) or blocked.
+- agent_status(status, note, task_id?) — set your status where crew cannot tell it: waiting (park a card) on something other than a question you asked, or blocked.
 - git_commit(message) — commit everything in your worktree; returns the commit id.
 - git_diff(against?) / git_status() — inspect your changes.
 - git_cherry_pick(commit) / git_merge(from_agent) — bring a teammate's work into your branch.
@@ -262,6 +264,11 @@ line goes to each of them, and their answers come back.\n\
 or something to say mid-turn.\n\
 If your work affects another agent, or you need something from one, talk to it yourself: \
 the orchestrator is not a relay.\n\n\
+Every response you make sends your whole conversation to the model again, so each tool call \
+that waits for the one before costs that much. Make the calls that do not depend on one \
+another together, in one response (a message and a status; a commit and the next read), and \
+do not follow a call that settles things (a message sent, a verdict, a status) with a closing \
+line that says it again.\n\n\
 Messages from the team arrive in this conversation as lines starting with \"[crew]\". \
 They come from your teammates or the crew scheduler, not from a human. Act on them.\n"
     );
@@ -316,8 +323,11 @@ so do not send it progress or status reports: task_update records progress where
 see it. Before parking source changes, checkpoint them with git_commit where that tool is \
 available, or record which pending edits belong to this card and keep their ownership clear \
 during the next card. git_commit commits the whole worktree, so a later card's commit must \
-not silently include parked unfinished work. If you must wait for a teammate, call agent_status(\"waiting\", \
-\"<who and what>\") and end this turn. That card stays parked while another independent Ready \
+not silently include parked unfinished work. Your status follows your cards when a turn ends: \
+a card in review, or no open card, needs no report. If you must wait for a teammate, ask it (a \
+question, or review_request) and end this turn: while that is unanswered crew parks the card as \
+waiting on it, with no agent_status. For any other wait, agent_status(\"waiting\", \"<who and \
+what>\"). That card stays parked while another independent Ready \
 card may arrive. Id-less task calls address your executing card, otherwise your most recently \
 started Waiting card (equal starts keep board order). Name a parked card by id when acting \
 on it during another task. Incoming messages are retained and crew points you back to parked \
@@ -356,8 +366,8 @@ ask-the-user dialog, is never seen and leaves you stuck. Settle what you can you
 with the teammate who owns the area. When something is not yours to decide (a requirement \
 that is missing, a preference, a risky or irreversible choice), {whom}. Say what you need to \
 know, why, and the options you see. Then carry on with what does not depend on the answer, \
-stating the assumption you made, or call agent_status(\"waiting\", ...) if nothing does. The \
-answer arrives as a [crew] message.\n"
+stating the assumption you made, or end the turn if nothing does: crew parks your card while \
+the question is open. The answer arrives as a [crew] message.\n"
     )
 }
 
@@ -386,6 +396,12 @@ task_edit rather than a message. Workers message each other directly — you are
 loop for their conversations and must not act as a relay.\n\n\
 You have a `crew` MCP server with these tools:\n\
 {TOOLS_COMMON}\n{TOOLS_ORCHESTRATOR}\n\n\
+Every response you make sends your whole conversation to the model again, so each tool call \
+that waits for the one before costs that much. Make the calls that do not depend on one \
+another together, in one response (the cards of a plan, a card and its assignment), and do not \
+follow a call that settles things with a closing line that says it again. To learn where a \
+member stands, agent_peek(id): a message asking it wakes it for a turn over its own whole \
+conversation. Message a member when you need something from it, not to check on it.\n\n\
 ## Your job\n\
 1. Staff. You decide who is on the team. If it has no members yet, work out which roles \
 the objective needs and add them with agent_add (2 to 10 members, each with a distinct \

@@ -2177,6 +2177,133 @@ fn a_card_edit_the_database_refuses_is_an_error_and_not_applied() {
 }
 
 #[test]
+fn a_question_sent_with_wait_parks_the_card_in_the_same_call() {
+    let s = Session::new();
+    let team = s.team(
+        "ask-and-wait",
+        vec![agent("author", "", &[]), agent("helper", "", &[])],
+        vec![task("write", "author", &[])],
+    );
+    s.run(&team);
+    s.wait_for("the author to be on write", || {
+        s.agent_cmd(&["output", "author"])
+            .contains("Task write is yours")
+    });
+    let ask = json!({ "to": "helper", "body": "which file?", "type": "question", "wait": true })
+        .to_string();
+    let out = s.ctl("author", &["tool", "agent_send", &ask]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        stdout(&out).contains("You are waiting on helper now."),
+        "{}",
+        stdout(&out)
+    );
+    assert!(s
+        .messages()
+        .iter()
+        .any(|m| m.from == "author" && m.to == "helper" && m.body == "which file?"));
+    let parked = s.wait("the card to be parked", |snap| {
+        find_task(snap, "write").status == TaskStatus::Waiting
+    });
+    assert_eq!(find_agent(&parked, "author").status, AgentStatus::Waiting);
+}
+
+#[test]
+fn a_teammate_is_peeked_at_without_being_sent_anything() {
+    let s = Session::new();
+    let team = s.team(
+        "peek",
+        vec![agent("author", "", &[]), agent("helper", "", &[])],
+        vec![task("write", "author", &[])],
+    );
+    s.run(&team);
+    s.wait_for("the author to be on write", || {
+        s.agent_cmd(&["output", "author"])
+            .contains("Task write is yours")
+    });
+    let progress = json!({ "percent": 40, "message": "parser half done" }).to_string();
+    let out = s.ctl("author", &["tool", "task_update", &progress]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let before = s.messages().len();
+
+    let peek = json!({ "id": "author" }).to_string();
+    let out = s.ctl("helper", &["tool", "agent_peek", &peek]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let seen = stdout(&out);
+    assert!(seen.starts_with("author ["), "{seen}");
+    assert!(seen.contains("last active "), "{seen}");
+    assert!(seen.contains("write [working] author"), "{seen}");
+    // Nothing reached the author: no message, no turn.
+    assert_eq!(s.messages().len(), before);
+    let unknown = s.ctl(
+        "helper",
+        &["tool", "agent_peek", &json!({ "id": "nobody" }).to_string()],
+    );
+    assert!(!unknown.status.success());
+}
+
+#[test]
+fn a_turn_that_ends_with_its_question_unanswered_parks_the_card_by_itself() {
+    let s = Session::new();
+    let team = s.team(
+        "ask-and-stop",
+        vec![agent("author", "", &[]), agent("helper", "", &[])],
+        vec![task("write", "author", &[])],
+    );
+    s.run(&team);
+    s.wait_for("the author to be on write", || {
+        s.agent_cmd(&["output", "author"])
+            .contains("Task write is yours")
+    });
+    let turn_end = |id: &str| {
+        let out = s
+            .command()
+            .env("CREW_IDENTITY", s.identity_path(id))
+            .args(["hook", "turn-end", "{}"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+    };
+    let send = |from: &str, to: &str, kind: &str, body: &str| {
+        let args = json!({ "to": to, "body": body, "type": kind }).to_string();
+        let out = s.ctl(from, &["tool", "agent_send", &args]);
+        assert!(out.status.success(), "{}", stderr(&out));
+    };
+
+    // Nothing asked: the card is still in progress when the turn ends.
+    send("author", "helper", "status", "on it");
+    turn_end("author");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(
+        find_task(&s.snapshot(), "write").status,
+        TaskStatus::Working
+    );
+
+    // A question answered within the turn leaves it in progress too.
+    send("author", "helper", "question", "which file?");
+    send("helper", "author", "message", "src/lib.rs");
+    turn_end("author");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(
+        find_task(&s.snapshot(), "write").status,
+        TaskStatus::Working
+    );
+
+    // One still out when the turn ends: parked on whoever was asked, with no
+    // agent_status from the author.
+    send("author", "helper", "question", "which test?");
+    turn_end("author");
+    let parked = s.wait("the card to be parked", |snap| {
+        find_task(snap, "write").status == TaskStatus::Waiting
+    });
+    assert_eq!(find_agent(&parked, "author").status, AgentStatus::Waiting);
+    assert_eq!(
+        find_task(&parked, "write").note.as_deref(),
+        Some("waiting on helper")
+    );
+}
+
+#[test]
 fn a_refused_task_fail_leaves_what_the_agent_said_about_itself() {
     let s = Session::new();
     let team = s.team(
@@ -4700,8 +4827,9 @@ fn a_usage_limit_parks_the_agent_until_it_is_resumed() {
     });
     assert_eq!(find_agent(&free, "claude-1").status, AgentStatus::Working);
 
-    // A login that stopped working does not lift by waiting: no automatic
-    // resume, and `crew resume --restart` starts the session afresh.
+    // A login that stopped working does not lift by waiting, but the session
+    // holds the one it started with: crew restarts it soon, which takes the
+    // login in place now, and `crew resume` restarts it at once.
     hook(
         "claude-1",
         "stop-failure",
@@ -4711,11 +4839,17 @@ fn a_usage_limit_parks_the_agent_until_it_is_resumed() {
         find_agent(snap, "claude-1").limit.is_some()
     });
     let limit = find_agent(&parked, "claude-1").limit.clone().unwrap();
-    assert_eq!((limit.kind.as_str(), limit.retry_at), ("auth", None));
-    assert!(find_agent(&parked, "claude-1")
-        .activity
-        .starts_with("sign-in needed"));
-    let out = s.ok(&["resume", "--restart", "-C", &ws]);
+    assert_eq!(limit.kind, "auth");
+    assert!(
+        limit.retry_at.is_some_and(|at| at > limit.since),
+        "{limit:?}"
+    );
+    let activity = &find_agent(&parked, "claude-1").activity;
+    assert!(
+        activity.starts_with("sign-in needed · restarts "),
+        "{activity}"
+    );
+    let out = s.ok(&["resume", "-C", &ws]);
     assert!(
         out.contains("restarted, resuming their sessions: claude-1"),
         "{out}"
@@ -4738,6 +4872,99 @@ fn a_usage_limit_parks_the_agent_until_it_is_resumed() {
         s.has_event("agent.turn_failed")
     });
     assert!(find_agent(&s.snapshot(), "claude-1").limit.is_none());
+}
+
+/// Claude Code at a usage limit: once a file `menu` sits next to its
+/// identity it opens its usage-limit menu, an upsell first, and records
+/// every key it is sent (hex, one per line); Esc closes the menu.
+const FAKE_CLAUDE_LIMIT_MENU: &str = r#"#!/bin/sh
+dir="${CREW_IDENTITY%/*}"
+stty raw -echo 2>/dev/null
+(
+  while [ ! -e "$dir/menu" ]; do sleep 0.2; done
+  printf '\033[2J\033[H  Carry on with the task.\r\n────────────────────────────────\r\n  What do you want to do?\r\n\r\n  ❯ 1. Upgrade your plan\r\n    2. Stop and wait for limit to reset\r\n    3. Switch to usage credits\r\n\r\n  Enter to confirm · Esc to cancel\r\n'
+) &
+while :; do
+  key=$(dd bs=1 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')
+  [ -n "$key" ] || exit 0
+  printf '%s\n' "$key" >> "$dir/fake-keys"
+  if [ "$key" = "1b" ]; then printf '\033[2J\033[H  You have hit your session limit\r\n> \r\n'; fi
+done
+"#;
+
+#[test]
+fn claude_codes_usage_limit_menu_is_closed_without_choosing_anything() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let s = Session::new();
+    let root = s.root().to_path_buf();
+    std::fs::create_dir_all(root.join("bin")).unwrap();
+    std::fs::write(root.join("bin/claude"), FAKE_CLAUDE_LIMIT_MENU).unwrap();
+    std::fs::set_permissions(
+        root.join("bin/claude"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    let path = format!(
+        "{}:{}",
+        root.join("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let mut team = s.team("menu", vec![], vec![]);
+    team.defaults.delivery = crew_core::config::DeliveryChoice::Terminal;
+    // Far enough out that nothing resumes by itself during the test.
+    team.limits.limit_retry_secs = 3600;
+    team.agents.push(AgentSpec {
+        id: "claude-1".to_string(),
+        runtime: Some(RuntimeKind::Claude),
+        task: Some("work for claude-1".to_string()),
+        ..AgentSpec::default()
+    });
+    std::fs::write(root.join("team.yaml"), team.to_yaml().unwrap()).unwrap();
+    let out = s
+        .command()
+        .env("PATH", &path)
+        .args(["run", "team.yaml", "--no-attach"])
+        .output()
+        .expect("running crew");
+    assert!(out.status.success(), "{}", stderr(&out));
+    s.wait("claude-1 to come up", |snap| {
+        find_agent(snap, "claude-1").status != AgentStatus::Spawning
+    });
+    let identity = s.identity_path("claude-1").to_string_lossy().into_owned();
+    let hook = |event: &str, payload: &str| {
+        let out = s.crew(&["hook", event, "--identity", &identity, payload]);
+        assert!(out.status.success(), "{event}: {}", stderr(&out));
+    };
+    let session = find_agent(&s.snapshot(), "claude-1")
+        .session_id
+        .clone()
+        .unwrap();
+    hook(
+        "session-start",
+        &json!({ "session_id": session, "transcript_path": "/nonexistent" }).to_string(),
+    );
+
+    // The session runs into its limit, and Claude Code opens its menu.
+    hook(
+        "stop-failure",
+        r#"{"error":"rate_limit","error_details":"You've hit your session limit · resets 11:58pm"}"#,
+    );
+    s.wait("claude-1 to be parked", |snap| {
+        find_agent(snap, "claude-1").limit.is_some()
+    });
+    let dir = s.workspace.join(".crew/agents/claude-1");
+    std::fs::write(dir.join("menu"), "").unwrap();
+    let keys = || std::fs::read_to_string(dir.join("fake-keys")).unwrap_or_default();
+    s.wait_for("the menu to be closed", || {
+        keys().lines().any(|k| k == "1b")
+    });
+    // Esc alone: no option was chosen, and the agent waits at its limit.
+    assert_eq!(keys().trim(), "1b", "{}", keys());
+    assert!(s.has_event("agent.notice_dismissed"));
+    let agent = find_agent(&s.snapshot(), "claude-1").clone();
+    assert_eq!(agent.limit.map(|l| l.kind), Some("usage".to_string()));
+    assert_eq!(agent.block_kind.as_deref(), Some("usage_limit"));
 }
 
 // ---------------------------------------------------------------------------
@@ -8204,7 +8431,7 @@ fn a_turn_that_ends_without_a_tool_call_is_asked_again_and_only_one_that_decline
     assert!(
         again.contains("question from lead")
             && again.contains("decline(reason)")
-            && again.contains("agent_status(\"idle\""),
+            && again.contains("end this turn with nothing more"),
         "{again}"
     );
     assert!(s.has_event("agent.unanswered"));

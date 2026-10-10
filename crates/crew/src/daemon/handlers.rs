@@ -385,7 +385,13 @@ change identity",
             Call::Resume { agents, restart } => {
                 operator_only(&who)?;
                 let resumed = self.resume_limited(&agents, restart, false).await?;
-                Ok(json!({ "resumed": resumed }))
+                let restarted: Vec<&str> = resumed
+                    .iter()
+                    .filter(|(_, restarted)| *restarted)
+                    .map(|(id, _)| id.as_str())
+                    .collect();
+                let resumed: Vec<&str> = resumed.iter().map(|(id, _)| id.as_str()).collect();
+                Ok(json!({ "resumed": resumed, "restarted": restarted }))
             }
             Call::AgentResume { id } => {
                 operator_only(&who)?;
@@ -978,7 +984,7 @@ change identity",
         Ok(sent)
     }
 
-    fn self_status(
+    pub(crate) fn self_status(
         &self,
         agent: &str,
         status: AgentStatus,

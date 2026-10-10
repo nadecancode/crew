@@ -22,9 +22,31 @@ pub mod tools;
 const LATEST_PROTOCOL: &str = "2025-06-18";
 const SUPPORTED_PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
+/// The calls a turn usually ends with. To a client that can end a turn
+/// with a tool result (Claude Code: `_meta["claude/endTurn"]`) each takes
+/// `end_turn`: the turn ends with the call, instead of with one more model
+/// request, the whole conversation sent again, to write a closing line
+/// nobody reads.
+const END_TURN_TOOLS: &[&str] = &[
+    "agent_send",
+    "agent_broadcast",
+    "agent_status",
+    "task_complete",
+    "task_fail",
+    "review_submit",
+];
+/// Called, it ends the turn whatever the arguments: what comes of it is
+/// decided when the turn is over (decline, in its description).
+const ALWAYS_END_TURN: &[&str] = &["decline"];
+const END_TURN_META: &str = "claude/endTurn";
+/// The client that reads `END_TURN_META`, by the name it gives at `initialize`.
+const END_TURN_CLIENT: &str = "claude-code";
+
 struct Bridge {
     identity: Identity,
     client: Option<Client>,
+    /// The client ends a turn on a tool result that asks it to.
+    ends_turns: bool,
 }
 
 impl Bridge {
@@ -77,20 +99,35 @@ check before calling {name} again"
     }
 }
 
-fn tool_list(orchestrator: bool) -> Value {
+fn tool_list(orchestrator: bool, ends_turns: bool) -> Value {
     let tools: Vec<Value> = tools::definitions()
         .into_iter()
         .filter(|t| orchestrator || !t.orchestrator_only)
         .map(|t| {
+            let mut schema = t.schema;
+            if ends_turns && END_TURN_TOOLS.contains(&t.name) {
+                schema["properties"]["end_turn"] = json!({
+                    "type": "boolean",
+                    "description": "true when nothing follows this call this turn: the turn ends with \
+it, and no closing text is written (every further response sends your whole conversation again)",
+                });
+            }
             json!({
                 "name": t.name,
                 "description": t.description,
-                "inputSchema": t.schema,
+                "inputSchema": schema,
                 "annotations": { "readOnlyHint": t.read_only, "openWorldHint": false },
             })
         })
         .collect();
     json!({ "tools": tools })
+}
+
+/// Whether a call that succeeded ends the turn.
+fn ends_turn(name: &str, args: &Value) -> bool {
+    ALWAYS_END_TURN.contains(&name)
+        || (END_TURN_TOOLS.contains(&name)
+            && args.get("end_turn").and_then(Value::as_bool) == Some(true))
 }
 
 fn handle(bridge: &mut Bridge, message: &Value) -> Option<Value> {
@@ -99,6 +136,8 @@ fn handle(bridge: &mut Bridge, message: &Value) -> Option<Value> {
     let params = message.get("params").cloned().unwrap_or(Value::Null);
     let result: Result<Value, (i64, String)> = match method {
         "initialize" => {
+            bridge.ends_turns =
+                params.pointer("/clientInfo/name").and_then(Value::as_str) == Some(END_TURN_CLIENT);
             let requested = params
                 .get("protocolVersion")
                 .and_then(Value::as_str)
@@ -117,7 +156,7 @@ fn handle(bridge: &mut Bridge, message: &Value) -> Option<Value> {
             }))
         }
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(tool_list(bridge.is_orchestrator())),
+        "tools/list" => Ok(tool_list(bridge.is_orchestrator(), bridge.ends_turns)),
         "tools/call" => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
             let args = params
@@ -125,6 +164,11 @@ fn handle(bridge: &mut Bridge, message: &Value) -> Option<Value> {
                 .cloned()
                 .unwrap_or_else(|| json!({}));
             Ok(match bridge.call_tool(name, &args) {
+                Ok(text) if bridge.ends_turns && ends_turn(name, &args) => json!({
+                    "content": [{ "type": "text", "text": text }],
+                    "isError": false,
+                    "_meta": { END_TURN_META: true },
+                }),
                 Ok(text) => {
                     json!({ "content": [{ "type": "text", "text": text }], "isError": false })
                 }
@@ -164,6 +208,7 @@ pub fn serve(identity_path: Option<&Path>) -> Result<()> {
     let mut bridge = Bridge {
         identity,
         client: None,
+        ends_turns: false,
     };
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().lock();
@@ -202,6 +247,7 @@ mod tests {
                 orchestrator: false,
             },
             client: None,
+            ends_turns: false,
         }
     }
 
@@ -336,8 +382,134 @@ mod tests {
                 orchestrator: false,
             },
             client: None,
+            ends_turns: false,
         };
         (dir, bridge, taken)
+    }
+
+    /// A daemon that answers the hello and then every request: a status
+    /// call with the agent, anything else with an error.
+    fn daemon_that_answers() -> (tempfile::TempDir, Bridge) {
+        use std::io::{BufRead, BufReader, Write};
+        let (dir, bridge, _) = daemon_that_drops_requests();
+        let socket = dir.path().join("answers.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                let mut hello = true;
+                while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                    let request: Value = serde_json::from_str(&line).unwrap();
+                    line.clear();
+                    let reply = if std::mem::take(&mut hello) {
+                        let info = crew_core::rpc::HelloInfo {
+                            role: crew_core::rpc::Role::Agent,
+                            agent_id: Some("claude-1".into()),
+                            project: None,
+                            version: "test".into(),
+                            protocol: crew_core::rpc::PROTOCOL_VERSION,
+                            pid: 1,
+                            web_proof: None,
+                        };
+                        json!({ "id": request["id"], "result": info })
+                    } else if request["method"] == "status_update" {
+                        let agent = json!({
+                            "id": "claude-1", "name": "claude-1", "role": "work",
+                            "status": request["params"]["status"], "runtime": "claude",
+                            "workdir": "/w", "backend": "pty", "last_activity_at": 0
+                        });
+                        json!({ "id": request["id"], "result": agent })
+                    } else {
+                        json!({ "id": request["id"], "error": { "code": "invalid", "message": "no" } })
+                    };
+                    writeln!(stream, "{reply}").unwrap();
+                }
+            }
+        });
+        let bridge = Bridge {
+            identity: Identity {
+                socket: socket.to_string_lossy().into_owned(),
+                ..bridge.identity
+            },
+            ..bridge
+        };
+        (dir, bridge)
+    }
+
+    #[test]
+    fn claude_code_ends_its_turn_with_the_call_that_closes_it() {
+        let send = |b: &mut Bridge, method: &str, params: Value| {
+            handle(
+                b,
+                &json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}),
+            )
+            .unwrap()["result"]
+                .clone()
+        };
+        let schema = |list: &Value, name: &str| {
+            list["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|t| t["name"] == name)
+                .unwrap()["inputSchema"]
+                .clone()
+        };
+        for (client, ends) in [("claude-code", true), ("codex-mcp-client", false)] {
+            let (_dir, mut b) = daemon_that_answers();
+            send(
+                &mut b,
+                "initialize",
+                json!({ "protocolVersion": LATEST_PROTOCOL, "clientInfo": { "name": client, "version": "1" } }),
+            );
+            let list = send(&mut b, "tools/list", json!({}));
+            for name in [
+                "agent_send",
+                "agent_status",
+                "task_complete",
+                "review_submit",
+            ] {
+                assert_eq!(
+                    schema(&list, name)["properties"]["end_turn"].is_object(),
+                    ends,
+                    "{client}: {name}"
+                );
+            }
+            // A call that closes nothing, or a read, never offers it.
+            for name in ["tasks_list", "task_get", "git_commit", "decline"] {
+                assert!(
+                    schema(&list, name)["properties"]["end_turn"].is_null(),
+                    "{name}"
+                );
+            }
+            let call = |b: &mut Bridge, name: &str, args: Value| {
+                send(b, "tools/call", json!({ "name": name, "arguments": args }))
+            };
+            let ended =
+                |result: &Value| result["_meta"]["claude/endTurn"].as_bool().unwrap_or(false);
+            let parked = call(
+                &mut b,
+                "agent_status",
+                json!({ "status": "waiting", "end_turn": true }),
+            );
+            assert_eq!(parked["isError"], false, "{parked}");
+            assert_eq!(ended(&parked), ends, "{client}: {parked}");
+            // Asked for, or not: the turn goes on without it.
+            let working = call(&mut b, "agent_status", json!({ "status": "working" }));
+            assert!(!ended(&working), "{working}");
+            // A call that failed never ends the turn: the model sees the error.
+            let failed = call(
+                &mut b,
+                "task_complete",
+                json!({ "result": "done", "end_turn": true }),
+            );
+            assert_eq!(failed["isError"], true, "{failed}");
+            assert!(!ended(&failed), "{failed}");
+        }
+        assert!(ends_turn("decline", &json!({ "reason": "no" })));
+        assert!(!ends_turn("git_commit", &json!({ "end_turn": true })));
     }
 
     #[test]
@@ -427,6 +599,7 @@ mod tests {
                 orchestrator: false,
             },
             client: None,
+            ends_turns: false,
         };
         let sentence = format!(
             "crew {} (protocol {}) cannot talk to the daemon of /w/payments, which is crew 9.9.9 \

@@ -5,7 +5,8 @@
 //! it wait on the bus. It goes on again when the runtime does so by itself,
 //! when crew resumes it (at the reset time, or on a retry interval when the
 //! runtime gave none), or when the operator runs `crew resume`: optionally
-//! restarting the session so that a new login or key is picked up.
+//! restarting the session so that a new login or key is picked up. One
+//! parked at a login that stopped working is always restarted, and soon.
 
 use std::sync::atomic::Ordering;
 
@@ -61,6 +62,9 @@ fn describe(limit: &UsageLimit, now: i64) -> String {
         text.push_str(&format!(" · resets {}", fmt_when(at, now)));
     }
     match limit.retry_at {
+        Some(at) if limit.kind == LimitKind::Auth.as_str() => {
+            text.push_str(&format!(" · restarts {}", fmt_when(at, now)))
+        }
         Some(at) => text.push_str(&format!(" · resumes {}", fmt_when(at, now))),
         None => text.push_str(" · waiting for `crew resume`"),
     }
@@ -101,13 +105,19 @@ impl Daemon {
             rt.idle_since = None;
             rt.limit_attempts
         };
+        let retry_ms = ((retry_secs as i64) * 1000).max(MIN_RETRY_MS);
         let retry_at = |resets_at: Option<i64>| match info.kind {
-            // Nothing lifts by waiting when the login itself is the problem.
-            LimitKind::Auth => None,
             _ if !auto_resume => None,
+            // A login does not come back by waiting, but the session holds
+            // the one it started with: most often the account was switched
+            // under it, and a restart (resume_limited) takes the one in
+            // place now. Soon the first time; a login that is gone for good
+            // is tried again on the interval.
+            LimitKind::Auth if attempts == 0 => Some(now + MIN_RETRY_MS),
+            LimitKind::Auth => Some(now + retry_ms),
             _ => Some(match resets_at {
                 Some(at) => (at + RESET_MARGIN_MS).max(now + MIN_RETRY_MS),
-                None => now + ((retry_secs as i64) * 1000).max(MIN_RETRY_MS),
+                None => now + retry_ms,
             }),
         };
         if let Some(current) = &agent.limit {
@@ -248,13 +258,14 @@ other model family (task_assign).",
     /// Continue agents parked at a usage limit: the named ones, or all of
     /// them. `restart` starts each process afresh, resuming its session, so
     /// a changed login or key takes effect; otherwise the running session is
-    /// simply prompted to go on.
+    /// simply prompted to go on. Each one continued, and whether it was
+    /// restarted.
     pub(crate) async fn resume_limited(
         &self,
         ids: &[String],
         restart: bool,
         automatic: bool,
-    ) -> Result<Vec<String>, RpcError> {
+    ) -> Result<Vec<(String, bool)>, RpcError> {
         let targets: Vec<Agent> = {
             let model = self.model();
             if let Some(unknown) = ids.iter().find(|id| model.agent(id).is_none()) {
@@ -275,11 +286,6 @@ other model family (task_assign).",
                 .collect()
         };
         let procs = self.procs()?;
-        let how = match (automatic, restart) {
-            (true, _) => "resumed automatically",
-            (false, true) => "restarted by the operator",
-            (false, false) => "resumed by the operator",
-        };
         let mut resumed = Vec::new();
         for agent in targets {
             let id = agent.id.as_str();
@@ -288,6 +294,18 @@ other model family (task_assign).",
             if agent.limit.is_none() && !restart {
                 continue;
             }
+            // Parked at a login that stopped working: prompted, the session
+            // runs into it again; restarted, it takes the login in place now.
+            let restart = restart
+                || agent
+                    .limit
+                    .as_ref()
+                    .is_some_and(|l| l.kind == LimitKind::Auth.as_str());
+            let how = match (automatic, restart) {
+                (true, _) => "resumed automatically",
+                (false, true) => "restarted by the operator",
+                (false, false) => "resumed by the operator",
+            };
             let now = now_ms();
             let was_parked = self.limit_lifted(id, how).is_some();
             {
@@ -305,6 +323,12 @@ other model family (task_assign).",
                 self.restart_agent_with(id, Some(RESTART_NOTICE.to_string()))
                     .await?;
             } else {
+                // The menu the runtime opened at the limit, should it still
+                // be open, would take the prompt as its answer.
+                let screen = procs.visible(id, 60).await.unwrap_or_default();
+                if self.dismiss_notice(id, &screen).await {
+                    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                }
                 self.model().rt(id).turn_active = true;
                 self.update_agent(id, |a| {
                     a.status = AgentStatus::Working;
@@ -324,7 +348,7 @@ other model family (task_assign).",
                 }
             }
             self.request_delivery(id);
-            resumed.push(agent.id.clone());
+            resumed.push((agent.id.clone(), restart));
         }
         Ok(resumed)
     }
@@ -384,8 +408,16 @@ other model family (task_assign).",
                     }
                 }
                 if let Some(limit) = &agent.limit {
-                    if limit.retry_at.is_some_and(|at| at <= now) {
+                    let is_due = limit.retry_at.is_some_and(|at| at <= now);
+                    if is_due {
                         due.push(agent.id.clone());
+                    }
+                    // A parked session's screen is read too: the menu a
+                    // runtime opens at the limit is closed before crew
+                    // types anything into it.
+                    if rt.ready && (is_due || now - rt.limit_checked_at >= SCREEN_QUIET_MS) {
+                        rt.limit_checked_at = now;
+                        screens.push((agent.id.clone(), agent.runtime));
                     }
                     continue;
                 }
@@ -409,7 +441,6 @@ other model family (task_assign).",
             let screen = procs.visible(&id, 60).await.unwrap_or_default();
             if let Some(info) = runtime_for(runtime).detect_limit(&screen, now) {
                 self.agent_limited(&id, info).await;
-                continue;
             }
             self.dismiss_notice(&id, &screen).await;
         }
@@ -694,5 +725,9 @@ mod tests {
             describe(&limit, now),
             "sign-in needed · waiting for `crew resume`"
         );
+        // A login is not waited for but restarted into.
+        limit.retry_at = Some(now + 60_000);
+        let text = describe(&limit, now);
+        assert!(text.starts_with("sign-in needed · restarts "), "{text}");
     }
 }

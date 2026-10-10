@@ -133,17 +133,36 @@ pub fn status(target: &Target, json: bool) -> Result<()> {
 pub fn resume(target: &Target, agents: Vec<String>, restart: bool) -> Result<()> {
     let (mut client, _) = target.connect("cli")?;
     let reply: Value = client.call(Call::Resume { agents, restart })?;
-    let resumed: Vec<&str> = reply
-        .get("resumed")
-        .and_then(Value::as_array)
-        .map(|ids| ids.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_default();
+    let ids = |field: &str| -> Vec<&str> {
+        reply
+            .get(field)
+            .and_then(Value::as_array)
+            .map(|ids| ids.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default()
+    };
+    let resumed = ids("resumed");
+    // Parked at a login that stopped working, an agent is restarted anyway.
+    let restarted = if restart {
+        resumed.clone()
+    } else {
+        ids("restarted")
+    };
+    let told: Vec<&str> = resumed
+        .iter()
+        .copied()
+        .filter(|id| !restarted.contains(id))
+        .collect();
     if resumed.is_empty() {
         println!("no agent is paused at a usage limit");
-    } else if restart {
-        println!("restarted, resuming their sessions: {}", resumed.join(", "));
-    } else {
-        println!("told to continue: {}", resumed.join(", "));
+    }
+    if !restarted.is_empty() {
+        println!(
+            "restarted, resuming their sessions: {}",
+            restarted.join(", ")
+        );
+    }
+    if !told.is_empty() {
+        println!("told to continue: {}", told.join(", "));
         println!("(after switching account or key, use `crew resume --restart` instead)");
     }
     Ok(())

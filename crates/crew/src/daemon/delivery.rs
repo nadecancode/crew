@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use crew_core::rpc::{Push, RpcError, ServerFrame};
 use crew_core::util::now_ms;
-use crew_core::{Agent, AgentStatus, Message, MessageType, RuntimeKind, OPERATOR_ID};
+use crew_core::{Agent, AgentStatus, Message, MessageType, RuntimeKind, Task, OPERATOR_ID};
 use tokio::sync::mpsc;
 
 use super::sandbox::{command, Run};
@@ -72,17 +72,49 @@ const GATHER_MAX_MS: i64 = 5_000;
 /// in with the next message that does start a turn (crew's notice that a
 /// task finished, say), or is read with agent_inbox. For the orchestrator
 /// always; for a member at rest (`resting`) unless it said it is waiting,
-/// when news may be what it waits for. A member mid-turn reads it in that
-/// turn, at no cost of its own.
-pub(crate) fn waits_for_company(to: &Agent, message: &Message, resting: bool) -> bool {
+/// when news may be what it waits for: from whoever it said it waits on
+/// (`waiting_on`), or from anyone when it named nobody. A member mid-turn
+/// reads it in that turn, at no cost of its own.
+pub(crate) fn waits_for_company(
+    to: &Agent,
+    message: &Message,
+    resting: bool,
+    waiting_on: &[String],
+) -> bool {
     let news =
         message.kind == MessageType::Status && !CREW_SENDERS.contains(&message.from.as_str());
-    news && (to.orchestrator || (resting && to.status != AgentStatus::Waiting))
+    let awaited = to.status == AgentStatus::Waiting
+        && (waiting_on.is_empty() || waiting_on.contains(&message.from));
+    news && (to.orchestrator || (resting && !awaited))
 }
 
 /// Whether anything waiting for `to` would start a turn.
-pub(crate) fn wakes(to: &Agent, pending: &[Message], resting: bool) -> bool {
-    pending.iter().any(|m| !waits_for_company(to, m, resting))
+pub(crate) fn wakes(to: &Agent, pending: &[Message], resting: bool, waiting_on: &[String]) -> bool {
+    pending
+        .iter()
+        .any(|m| !waits_for_company(to, m, resting, waiting_on))
+}
+
+/// Whom agent `id` said it waits on: the teammates (and the operator) its
+/// parked cards' notes name, as crew writes them when it parks a card on a
+/// question (`waiting on qa`) and as an agent writes them with
+/// agent_status. Empty when they name nobody.
+pub(crate) fn waiting_on(agents: &[Agent], tasks: &[Task], id: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let notes = tasks.iter().filter(|t| {
+        t.assigned_agent.as_deref() == Some(id) && t.status == crew_core::TaskStatus::Waiting
+    });
+    for note in notes.filter_map(|t| t.note.as_deref()) {
+        let words = note.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        let words: Vec<&str> = words.collect();
+        for word in words {
+            let known = word == OPERATOR_ID || agents.iter().any(|a| a.id == word && a.id != id);
+            if known && !names.iter().any(|n| n == word) {
+                names.push(word.to_string());
+            }
+        }
+    }
+    names
 }
 
 fn clip_for_argv(text: String, spans: &[crate::agents::prompt::NudgeSpan]) -> Option<String> {
@@ -730,7 +762,8 @@ impl Daemon {
                     return;
                 }
             }
-            if !wakes(&agent, &pending, resting) {
+            let waiting_on = waiting_on(&model.agents, &model.tasks, id);
+            if !wakes(&agent, &pending, resting, &waiting_on) {
                 // Only news: it rides along later.
                 return;
             }
@@ -1910,30 +1943,96 @@ mod tests {
             ..agent("orchestrator")
         };
         let news = message("lead", MessageType::Status);
+        let nobody: &[String] = &[];
         // The orchestrator: news always waits; crew's notices never do.
-        assert!(waits_for_company(&orchestrator, &news, false));
+        assert!(waits_for_company(&orchestrator, &news, false, nobody));
         assert!(!waits_for_company(
             &orchestrator,
             &message("scheduler", MessageType::Status),
-            true
+            true,
+            nobody
         ));
         // A member at rest: news waits, unless it said it is waiting.
-        assert!(waits_for_company(&member(AgentStatus::Idle), &news, true));
+        assert!(waits_for_company(
+            &member(AgentStatus::Idle),
+            &news,
+            true,
+            nobody
+        ));
         assert!(!waits_for_company(
             &member(AgentStatus::Waiting),
             &news,
-            true
+            true,
+            nobody
+        ));
+        // Waiting on someone named: only their news wakes it; anything
+        // else that is not news still does.
+        let on_qa = ["qa".to_string()];
+        assert!(waits_for_company(
+            &member(AgentStatus::Waiting),
+            &news,
+            true,
+            &on_qa
+        ));
+        assert!(!waits_for_company(
+            &member(AgentStatus::Waiting),
+            &message("qa", MessageType::Status),
+            true,
+            &on_qa
+        ));
+        assert!(!waits_for_company(
+            &member(AgentStatus::Waiting),
+            &message("lead", MessageType::Message),
+            true,
+            &on_qa
         ));
         // Mid-turn it is read in that turn.
         assert!(!waits_for_company(
             &member(AgentStatus::Working),
             &news,
-            false
+            false,
+            nobody
         ));
         // Anything else starts a turn.
         let asked = [news.clone(), message("lead", MessageType::Question)];
-        assert!(wakes(&member(AgentStatus::Idle), &asked, true));
-        assert!(!wakes(&member(AgentStatus::Idle), &asked[..1], true));
+        assert!(wakes(&member(AgentStatus::Idle), &asked, true, nobody));
+        assert!(!wakes(
+            &member(AgentStatus::Idle),
+            &asked[..1],
+            true,
+            nobody
+        ));
+    }
+
+    #[test]
+    fn whom_a_member_waits_on_is_read_off_its_parked_cards_by_id() {
+        let agents: Vec<Agent> = ["m", "qa", "orchestrator", "ui"]
+            .into_iter()
+            .map(agent)
+            .collect();
+        let card = |status: &str, note: &str| -> Task {
+            serde_json::from_value(serde_json::json!({
+                "id": format!("t-{note}"), "title": "t", "assigned_agent": "m", "status": status,
+                "created_at": 0, "note": note
+            }))
+            .unwrap()
+        };
+        let tasks = [
+            card(
+                "waiting",
+                "Await qa's three long-gap pairs and orchestrator's release",
+            ),
+            card("waiting", "waiting on qa"),
+            card("working", "ui is building"),
+        ];
+        assert_eq!(waiting_on(&agents, &tasks, "m"), ["qa", "orchestrator"]);
+        // Words that are no one's id, its own included, name nobody.
+        let vague = [card("waiting", "the build of m on main")];
+        assert!(waiting_on(&agents, &vague, "m").is_empty());
+        assert_eq!(
+            waiting_on(&agents, &[card("waiting", "waiting on operator")], "m"),
+            [OPERATOR_ID]
+        );
     }
 
     #[tokio::test]

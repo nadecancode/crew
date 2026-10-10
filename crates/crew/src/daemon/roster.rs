@@ -274,7 +274,7 @@ unless you give it more work now."
         }
         // News still on its way to the orchestrator may be about them.
         let pending = self.bus.undelivered(&orchestrator.id).unwrap_or_default();
-        if super::delivery::wakes(&orchestrator, &pending, true) {
+        if super::delivery::wakes(&orchestrator, &pending, true, &[]) {
             return;
         }
         for id in leaving {

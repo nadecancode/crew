@@ -30,14 +30,14 @@
 
 use crew_core::rpc::RpcError;
 use crew_core::types::{model_display_name, ModelFallback};
-use crew_core::util::{now_ms, truncate_chars};
+use crew_core::util::{now_ms, one_line, truncate_chars};
 use crew_core::{Agent, AgentStatus, MessageType, RuntimeKind, OPERATOR_ID};
 
 use super::policy::HomeModel;
 use super::Daemon;
 use crate::agents::prompt::nudge_senders;
 use crate::agents::Signal;
-use crate::limits::CodexTurnEnd;
+use crate::limits::{self, CodexTurnEnd, LimitInfo, LimitKind};
 use crate::message_bus::NewMessage;
 use crate::models::{Catalog, ModelProfile};
 use crate::persistence::NewEvent;
@@ -270,7 +270,7 @@ impl Daemon {
             "[crew] Your last turn ended without a tool call, so nothing came of it: a reply reaches \
 only whoever asked a question or sent a message. You were given {}. Do it, or answer with agent_send; if something \
 holds you up, say so with agent_status(\"waiting\" or \"blocked\", …); if it needs nothing from \
-you, agent_status(\"idle\", \"nothing to do\"). If you will not do it because it goes against your \
+you, end this turn with nothing more, which says so. If you will not do it because it goes against your \
 guidelines or usage policies, call decline(reason), and crew hands it to another model.",
             list.join(", ")
         );
@@ -547,6 +547,24 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
                 .as_ref()
                 .is_some_and(|(kind, _)| kind == "usage_limit_exceeded")
         {
+            return;
+        }
+        // A login that stopped working is parked as a limit (limits.rs): the
+        // same session only runs into it again, a restart takes the login
+        // in place now.
+        if let Some((_, message)) = end
+            .error
+            .as_ref()
+            .filter(|(kind, message)| limits::codex_signed_out(kind, message))
+        {
+            if unnoticed {
+                let info = LimitInfo {
+                    kind: LimitKind::Auth,
+                    message: truncate_chars(&one_line(message), 300),
+                    resets_at: None,
+                };
+                self.agent_limited(id, info).await;
+            }
             return;
         }
         if unnoticed {
@@ -1027,6 +1045,62 @@ mod provider_error_tests {
         daemon.stalled("y", "no activity for 900s".into()).await;
         let y = daemon.agent("y").unwrap();
         assert_eq!(y.block_kind.as_deref(), Some("unresponsive"));
+    }
+
+    #[tokio::test]
+    async fn a_codex_turn_that_failed_on_its_login_parks_the_agent_for_a_restart() {
+        let (_temp, running) = daemon_with("x").await;
+        let daemon = running.daemon.clone();
+        let failed = |turn: &str| CodexTurnEnd {
+            turn_id: turn.into(),
+            ended_at: Some(now_ms()),
+            error: Some((
+                "other".into(),
+                "workspace routing discovery unauthorized (401)".into(),
+            )),
+            input: vec![],
+        };
+        daemon.model().rt("x").turn_active = true;
+        let before = now_ms();
+        daemon.codex_turn_seen("x", failed("t-1")).await;
+        let x = daemon.agent("x").unwrap();
+        assert_eq!(
+            (x.status, x.block_kind.as_deref()),
+            (AgentStatus::Blocked, Some("usage_limit"))
+        );
+        let limit = x.limit.unwrap();
+        assert_eq!(limit.kind, "auth");
+        assert!(limit.message.contains("unauthorized (401)"), "{limit:?}");
+        // Restarted soon: the login in place now is most likely a good one.
+        let retry = limit.retry_at.expect("a restart is due");
+        assert!(
+            retry >= before + 60_000 && retry < before + 120_000,
+            "{retry}"
+        );
+        assert!(
+            x.activity.starts_with("sign-in needed · restarts "),
+            "{}",
+            x.activity
+        );
+        // It is not a provider error, which reminders run into again.
+        assert!(daemon.model().rt("x").provider_error.is_none());
+        let events = daemon.store.recent_events(Some("x"), 100).unwrap();
+        assert!(events.iter().any(|e| e.event_type == "agent.limited"));
+        assert!(!events.iter().any(|e| e.event_type == "agent.turn_failed"));
+
+        // The restarted session runs into it again: the login is gone, and
+        // is tried again on the retry interval.
+        daemon.limit_lifted("x", "restarted");
+        {
+            let mut model = daemon.model();
+            let rt = model.rt("x");
+            rt.limit_attempts = 1;
+            rt.turn_active = true;
+        }
+        let before = now_ms();
+        daemon.codex_turn_seen("x", failed("t-2")).await;
+        let retry = daemon.agent("x").unwrap().limit.unwrap().retry_at.unwrap();
+        assert!(retry >= before + 1_800_000, "{retry}");
     }
 
     #[tokio::test]

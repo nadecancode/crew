@@ -470,6 +470,17 @@ impl AgentRuntime for ClaudeRuntime {
                 },
             });
         }
+        if limit_menu_open(screen) {
+            // Esc is its cancel, as "Stop and wait for limit to reset" is:
+            // whichever order the options come in (an account may list
+            // "Switch to usage credits" first), nothing is bought.
+            return Some(Dialog {
+                kind: "notice",
+                description: "Claude Code's usage-limit menu (crew waits the limit out itself)"
+                    .into(),
+                accept_keys: vec!["esc"],
+            });
+        }
         if lower.contains("bypass permissions mode") && lower.contains("yes, i accept") {
             return Some(Dialog {
                 kind: "dialog",
@@ -494,6 +505,51 @@ impl AgentRuntime for ClaudeRuntime {
     fn usage(&self, transcript: &Path) -> Option<Usage> {
         read_usage(transcript)
     }
+}
+
+/// The options of the menu Claude Code opens by itself when a session runs
+/// into a usage limit (`/rate-limit-options`, Claude Code 2.1.295), less
+/// the plain "Stop" a usage-billed account gets.
+const LIMIT_MENU_OPTIONS: &[&str] = &[
+    "stop and wait for limit to reset",
+    "wait here, then continue automatically",
+    "don't continue automatically",
+    "wait for limit to reset",
+    "switch to usage",
+    "add funds to continue with",
+    "ask your admin for more usage",
+    "upgrade your plan",
+    "adjust monthly spend limit",
+];
+
+/// Whether Claude Code's usage-limit menu is open: its question, one of its
+/// options and its "Esc to cancel" at the bottom of the screen. While it is,
+/// the session takes nothing typed into it but as an answer. Text that only
+/// quotes the menu has the input box and status lines below it, never the
+/// menu's own last line.
+fn limit_menu_open(screen: &str) -> bool {
+    let lines: Vec<String> = screen
+        .lines()
+        .map(|l| l.trim().replace('\u{2019}', "'").to_lowercase())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let Some(cancel) = lines.iter().rposition(|l| l.contains("esc to cancel")) else {
+        return false;
+    };
+    let Some(question) = lines[..cancel]
+        .iter()
+        .rposition(|l| l.starts_with("what do you want to do?"))
+    else {
+        return false;
+    };
+    lines.len() - cancel <= 2
+        && cancel - question <= 14
+        && lines[question + 1..cancel].iter().any(|l| {
+            let option = l.trim_start_matches(|c: char| {
+                c == '❯' || c == '.' || c == ' ' || c.is_ascii_digit()
+            });
+            LIMIT_MENU_OPTIONS.iter().any(|o| option.starts_with(o))
+        })
 }
 
 fn str_field(payload: &Value, key: &str) -> Option<String> {
@@ -1158,6 +1214,59 @@ mod tests {
             .unwrap();
         assert_eq!(d.accept_keys, vec!["down", "enter"]);
         assert!(rt.detect_dialog("> Try \"fix the bug\"").is_none());
+    }
+
+    /// The menu as a session showed it after a resume ran into the limit
+    /// again (Claude Code 2.1.295).
+    const LIMIT_MENU: &str = "\
+  Now also features-p5-linux. Need same metrics for the money/percent precision
+  and lower/open-bound phases; format source via jj.
+────────────────────────────────────────────────────────────────────────────────
+  What do you want to do?
+
+  ❯ 1. Stop and wait for limit to reset
+    2. Wait here, then continue automatically at 3:00 PM
+    3. Switch to usage credits
+
+  Enter to confirm · Esc to cancel
+";
+
+    #[test]
+    fn the_usage_limit_menu_is_closed_with_esc_whatever_its_options() {
+        let rt = ClaudeRuntime;
+        let d = rt.detect_dialog(LIMIT_MENU).unwrap();
+        assert_eq!((d.kind, d.accept_keys), ("notice", vec!["esc"]));
+        // An account may be offered credits or an upgrade first: Esc still
+        // picks none of them.
+        let upsell_first = LIMIT_MENU
+            .replace(
+                "❯ 1. Stop and wait for limit to reset",
+                "❯ 1. Upgrade your plan",
+            )
+            .replace(
+                "3. Switch to usage credits",
+                "3. Stop and wait for limit to reset",
+            );
+        assert_eq!(
+            rt.detect_dialog(&upsell_first).unwrap().accept_keys,
+            ["esc"]
+        );
+        let usage_billed = LIMIT_MENU
+            .replace("Stop and wait for limit to reset", "Stop")
+            .replace(
+                "Switch to usage credits",
+                "Add funds to continue with usage",
+            );
+        assert!(rt.detect_dialog(&usage_billed).is_some());
+
+        // Quoted, as in a reply or a diff, with the input box below it; or
+        // another menu that asks the same: not this one.
+        let quoted = format!(
+            "{LIMIT_MENU}\n● The menu above is Claude Code's.\n\n────────\n❯ \n────────\n  ⏵⏵ bypass permissions on\n"
+        );
+        assert!(rt.detect_dialog(&quoted).is_none());
+        let other = "  What do you want to do?\n  ❯ 1. Resume the session\n    2. Start over\n  Enter to confirm · Esc to cancel\n";
+        assert!(rt.detect_dialog(other).is_none());
     }
 
     #[test]

@@ -156,20 +156,28 @@ crew, and restarted once a stop of it works"
     /// stopped for running another build: restarted if it is needed,
     /// stopped otherwise. Returns whether it was restarted.
     async fn resume_or_stop(&self, agent: &Agent) -> bool {
-        let needed = {
+        let (needed, waiting_on) = {
             let model = self.model();
+            let waiting_on =
+                super::super::delivery::waiting_on(&model.agents, &model.tasks, &agent.id);
             // Its own work, or a review it still owes.
             let open = model.tasks.iter().any(|t| {
                 (t.assigned_agent.as_deref() == Some(agent.id.as_str()) && !t.status.is_terminal())
                     || (t.status == TaskStatus::Review
                         && t.reviewer.as_deref() == Some(agent.id.as_str()))
             });
-            open || (agent.orchestrator && model.session.summary.is_none())
-        } || super::super::delivery::wakes(
-            agent,
-            &self.bus.undelivered(&agent.id).unwrap_or_default(),
-            true,
-        );
+            (
+                open || (agent.orchestrator && model.session.summary.is_none()),
+                waiting_on,
+            )
+        };
+        let needed = needed
+            || super::super::delivery::wakes(
+                agent,
+                &self.bus.undelivered(&agent.id).unwrap_or_default(),
+                true,
+                &waiting_on,
+            );
         if !needed {
             self.update_agent(&agent.id, |a| {
                 if a.status != AgentStatus::Done {

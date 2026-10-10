@@ -1,7 +1,7 @@
 //! Runtime signals and hooks: what a session reports, turned into the agent's status.
 
 use crew_core::util::now_ms;
-use crew_core::{AgentStatus, RuntimeKind};
+use crew_core::{AgentStatus, Message, MessageType, RuntimeKind, TaskStatus, BROADCAST};
 use serde_json::Value;
 
 use crate::agents::{runtime_for, Signal};
@@ -317,6 +317,7 @@ impl Daemon {
 
     /// A turn is over (it completed, or it failed): the agent is at rest.
     pub(crate) fn turn_ended(&self, id: &str, now: i64) {
+        self.park_on_open_question(id);
         let (transcript, asked) = {
             let mut model = self.model();
             let rt = model.rt(id);
@@ -362,6 +363,54 @@ impl Daemon {
         let daemon = self.clone();
         let agent = id.to_string();
         tokio::spawn(async move { daemon.check_turn(&agent, asked.0, asked.1).await });
+    }
+
+    /// A turn ends with the agent's card still in progress and a question
+    /// or review request of its own, sent while it worked on the card, that
+    /// nothing has come back for since: the card is parked as waiting on
+    /// whoever was asked, as agent_status("waiting") would, so the agent
+    /// spends no call (and no further model request, the whole conversation
+    /// sent again) to say so. One that said where it stands itself this turn
+    /// is left as it said.
+    fn park_on_open_question(&self, id: &str) {
+        let card = {
+            let mut model = self.model();
+            if model.rt(id).self_status.is_some() || model.agent(id).is_none_or(|a| a.orchestrator)
+            {
+                return;
+            }
+            match crate::tasks::executing_task(&model.tasks, id) {
+                Some(task) if task.status == TaskStatus::Working => task.clone(),
+                _ => return,
+            }
+        };
+        let since = card.started_at.unwrap_or(0);
+        let history = self.bus.history(Some(id), 200).unwrap_or_default();
+        // Whatever they wrote back since, of any type, is taken as the answer.
+        let answered = |asked: &Message| {
+            history.iter().any(|reply| {
+                reply.from == asked.to && reply.to == id && reply.timestamp >= asked.timestamp
+            })
+        };
+        let mut whom: Vec<&str> = Vec::new();
+        for asked in history.iter().filter(|m| {
+            m.from == id
+                && m.to != id
+                && m.to != BROADCAST
+                && m.timestamp >= since
+                && matches!(m.kind, MessageType::Question | MessageType::ReviewRequest)
+        }) {
+            if !answered(asked) && !whom.contains(&asked.to.as_str()) {
+                whom.push(&asked.to);
+            }
+        }
+        if whom.is_empty() {
+            return;
+        }
+        let note = format!("waiting on {}", whom.join(", "));
+        if let Err(e) = self.self_status(id, AgentStatus::Waiting, Some(note), Some(card.id)) {
+            tracing::warn!("parking {id}'s card after its question: {}", e.message);
+        }
     }
 
     fn touch(&self, id: &str, now: i64) {

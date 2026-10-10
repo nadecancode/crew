@@ -28,7 +28,7 @@ use codex::codex_rollout_in;
 pub use codex::{
     codex_compacted_since, codex_compacted_since_in, codex_context, codex_last_turn, codex_quota,
     codex_rollout_path, codex_running, codex_running_in, codex_running_of, codex_screen,
-    CodexTurnEnd,
+    codex_signed_out, CodexTurnEnd,
 };
 pub use pi::{pi_screen, pi_turn_error};
 pub use reset::parse_reset;
@@ -901,5 +901,27 @@ mod tests {
             "response_stream_disconnected"
         );
         assert_eq!(codex_last_turn(""), None);
+    }
+
+    #[test]
+    fn a_codex_turn_that_failed_on_its_login_is_told_from_other_errors() {
+        // As Codex 0.159 records it after the account was switched under a
+        // running session.
+        assert!(codex_signed_out(
+            "other",
+            "workspace routing discovery unauthorized (401)"
+        ));
+        assert!(codex_signed_out("unauthorized", "Unauthorized"));
+        assert!(codex_signed_out("other", "403 Forbidden"));
+        for (kind, message) in [
+            ("server_overloaded", "The server is overloaded"),
+            ("other", "workspace routing discovery failed"),
+            ("response_stream_disconnected", "stream disconnected (502)"),
+            ("other", "429 Too Many Requests"),
+            // A refusal is never a login, whatever it says.
+            ("cyber_policy", "flagged (403)"),
+        ] {
+            assert!(!codex_signed_out(kind, message), "{kind}: {message}");
+        }
     }
 }

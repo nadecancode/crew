@@ -503,11 +503,15 @@ impl Daemon {
         {
             let mut model = self.model();
             let toolbox_references = std::mem::take(&mut model.rt(id).toolbox_references);
+            // A restart out of a limit is a resume like any other: running
+            // into it again is counted as such (limits.rs).
+            let limit_attempts = model.rt(id).limit_attempts;
             model.rt.insert(
                 id.to_string(),
                 AgentRuntimeState {
                     spawned_at: now,
                     toolbox_references,
+                    limit_attempts,
                     ..AgentRuntimeState::default()
                 },
             );

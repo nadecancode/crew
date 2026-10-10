@@ -565,7 +565,8 @@ The orchestrator keeps each runtime's own guidance, since you read it.
 | Tool | Purpose |
 | --- | --- |
 | `agents_list` | who is on the team, role, status, task |
-| `agent_send(to, body, type?)` | message a teammate directly; `to` may list several (`db,lead`), each getting its own copy, and nothing is sent if one is unknown |
+| `agent_peek(id)` | where one teammate stands: its status, what it is doing and how long it has been quiet, and its open cards in full; it costs the teammate nothing, where asking it wakes it |
+| `agent_send(to, body, type?, wait?)` | message a teammate directly; `to` may list several (`db,lead`), each getting its own copy, and nothing is sent if one is unknown; `wait: true` also sets you waiting on them (your card parked), in the same call |
 | `agent_broadcast(body)` | message everyone |
 | `agent_inbox(id?)` | read (and acknowledge) messages; with an id, that one message, if you sent or received it |
 | `tasks_list(done?)` / `task_get(id?)` | the board, with done tasks one line each (`done: true` shows them in full); one task's card (default: your task in progress) |
@@ -580,6 +581,41 @@ The orchestrator keeps each runtime's own guidance, since you read it.
 | `agent_set_model(id, model, note?)` | orchestrator only: put a member on another model its CLI runs; its session is restarted there, resumed, and reads the note first (see [Usage limits](#usage-limits)). The orchestrator's own model, and moving anyone to another CLI, are refused: they are [the operator's](#changing-model-and-cli) |
 | `session_complete(summary, decisions?)` | orchestrator only: the final report; each of `decisions` is put to you as a question (see [Questions for you](#questions-for-you)) |
 | `operator_ask(question, options?, asked_by?)` | orchestrator only: put a question to you (see [Questions for you](#questions-for-you)) |
+
+**Fewer round trips.** Every response a model makes sends the whole
+conversation to the provider again (read from its prompt cache, but paid for),
+so a tool call that waits for the one before costs a whole context. The
+briefings ask for independent calls in one response (a message and a status;
+the cards of a plan), and for no closing line after a call that already said
+it. In Claude Code sessions the calls a turn usually ends with
+(`agent_send`, `agent_broadcast`, `agent_status`, `task_complete`,
+`task_fail`, `review_submit`) also take `end_turn: true`: crew's MCP server
+answers with Claude Code's `claude/endTurn` marker, and the turn ends with the
+call instead of with one more request to write that line; `decline` always
+ends it. The Stop hook runs as usual, and a call that failed never ends a
+turn. Codex has no such marker (its `PostToolUse` hooks can replace a tool's
+output but not end the turn, and it always asks the model again after a tool
+call), so its sessions are not offered the argument; Codex in code mode
+already makes several crew calls in one `exec`.
+
+What is left for both is not to need the last call at all. Most turns ended
+with `agent_status`, saying what crew knew: a card in review, or no open
+card. A member's status follows its cards when a turn ends, so it reports
+only what crew cannot tell. A turn that ends with the member's card in
+progress and a question or review request of its own that nothing has come
+back for (it was sent while the member worked on the card, to anyone but the
+whole team) parks the card as waiting on whoever was asked, as
+`agent_status("waiting")` would; the member just ends the turn.
+
+Nor is a member woken only to be asked where it stands, or to read news that
+is not for it. `agent_peek(id)` shows any teammate where one stands, from
+what crew already has, and the orchestrator is told to use it instead of
+messaging. A teammate's status news waits for a resting member's next turn;
+a member that is waiting is woken by news from whoever it said it waits on,
+read off the notes of its parked cards (`waiting on qa`, as crew writes them,
+or the ids an `agent_status` note names), and by anyone's news when they
+name nobody. A question, an answer, crew's own notices and anything else that
+is not news wake it as before.
 
 A direct message is persisted, published to subscribers (the dashboard
 animates the link immediately) and delivered into the recipient's session. The
@@ -1537,7 +1573,10 @@ it, reminders and the unresponsive check leave it alone, messages for it wait
 on the bus, and its task's timeout stops counting. The orchestrator is told
 once (so it can move the task to the other model family if the work should
 not wait). Every other agent carries on; a limit on the Claude account does
-not stop the Codex members.
+not stop the Codex members. Claude Code opens a menu of its own at a limit
+("What do you want to do?": stop and wait, continue automatically, switch to
+usage credits, upgrade); crew closes it with Esc, which chooses none of them,
+so it holds nothing crew types into the session later and nothing is bought.
 
 ```
  ✱ claude ⊘ usage limit reached · 2 paused (claude-1, claude-3) · resets in 1h57m · resumes in 1h58m · u continue now · U restart on a new login
@@ -1576,11 +1615,11 @@ is drawn muted on the strip, and `crew status` says `as of 2h ago` beside it.
 | the limit resets | crew resumes the agent by itself a minute after the reset time the runtime stated; with no stated time it retries every `limits.limit_retry_secs` (30 min) |
 | it lifted sooner, or you bought more | `crew resume`, or `u` in the dashboard |
 | you switched account or key | `claude /login` / `codex login` (or edit the key in the crew config), then `crew resume --restart`, or `U`. The sessions are restarted on the new credentials with their conversations resumed |
+| the login stopped working ("sign-in needed") | crew restarts the session a minute later, resuming its conversation: a running session keeps the login it started with, so one switched under it (a 401 such as Codex's `workspace routing discovery unauthorized`) is picked up then. If the restarted session runs into it again, crew tries again every `limits.limit_retry_secs`; `crew resume` or `u` restarts it at once |
 | the runtime continued by itself, or you typed into the session | noticed; the agent is simply no longer parked |
 
 `crew resume claude-1 codex-2` continues only those. `limits.auto_resume:
-false` turns the automatic resume off. A login that stopped working
-("sign-in needed") never resumes by itself.
+false` turns the automatic resume off, the restart into a login included.
 
 **A session moved to another model.** Claude Code does not always stop at a
 limit: when a model's own weekly window is used up (Fable's, say) it moves
