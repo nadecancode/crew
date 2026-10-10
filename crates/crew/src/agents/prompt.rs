@@ -4,6 +4,7 @@
 use std::fmt::Write;
 
 use crew_core::config::Voice;
+use crew_core::guardrails::{self, Messaging, ToolClass, Workflow};
 use crew_core::{Agent, Message, Task, ORCHESTRATOR_ID};
 
 /// Per-message cap when injecting bodies into a session; the full text stays
@@ -27,6 +28,138 @@ pub struct TeamView<'a> {
     pub vcs: crate::vcs::Kind,
     /// How members write to one another.
     pub voice: Voice,
+    /// What the team's style fixes about how members act.
+    pub rules: Rules<'a>,
+}
+
+/// The team's guardrails as a briefing says them (`crew_core::guardrails`):
+/// what is enforced, told so that nobody tries what it cannot do.
+#[derive(Default, Clone, Copy)]
+pub struct Rules<'a> {
+    pub messaging: Messaging,
+    pub workflow: Option<&'a Workflow>,
+    /// Members whose runtime tools the style cut down, with what they keep.
+    pub tools: &'a [(String, Vec<ToolClass>)],
+    /// Members whose crew tools the style cut down, with their selection.
+    pub crew_tools: &'a [(String, Vec<String>)],
+}
+
+impl Rules<'_> {
+    fn tools_of(&self, id: &str) -> Option<&[ToolClass]> {
+        self.tools
+            .iter()
+            .find(|(member, _)| member == id)
+            .map(|(_, classes)| classes.as_slice())
+    }
+
+    fn crew_tools_of(&self, id: &str) -> Option<&[String]> {
+        self.crew_tools
+            .iter()
+            .find(|(member, _)| member == id)
+            .map(|(_, selection)| selection.as_slice())
+    }
+}
+
+/// The tool lines of `text` a member gets: all, or those its `crew_tools`
+/// selection allows (each line is `- <name>(…) — …`).
+fn tool_lines(text: &str, selection: Option<&[String]>) -> String {
+    text.lines()
+        .filter(|line| {
+            let name = line
+                .trim_start_matches("- ")
+                .split(['(', ' '])
+                .next()
+                .unwrap_or("");
+            guardrails::crew_tool_allowed(selection, name)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// A list of tool classes, as the briefing says what they allow.
+fn classes_described(classes: &[ToolClass]) -> String {
+    classes
+        .iter()
+        .map(|class| class.describe())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// What a member's runtime tools are cut down to, as a briefing section:
+/// nothing when the style leaves them all.
+fn tools_section(me: &Agent, classes: Option<&[ToolClass]>) -> String {
+    let Some(classes) = classes else {
+        return String::new();
+    };
+    let missing = guardrails::missing_classes(classes);
+    let mut out = String::from("\n## Tools\n");
+    if classes.is_empty() {
+        out.push_str(
+            "This team's style gives you none of your runtime's own tools: your work is done \
+through the crew tools alone.",
+        );
+    } else {
+        let _ = write!(
+            out,
+            "This team's style cuts your runtime's own tools down to: {}.",
+            classes_described(classes)
+        );
+    }
+    if !missing.is_empty() {
+        let _ = write!(
+            out,
+            " You do not {}: your session was started without those tools.",
+            classes_described(&missing).replace("; ", "; or ")
+        );
+    }
+    let kept = crate::agents::unenforced(me.runtime, classes);
+    if !kept.is_empty() {
+        let _ = write!(
+            out,
+            " What your runtime cannot take away stays, and is not for what the style withholds: {}.",
+            kept.iter()
+                .map(|class| match class {
+                    ToolClass::Shell => "the shell is for reading and running, never for writing files or the web",
+                    ToolClass::Read => "reading is for what your card needs",
+                    ToolClass::Agents => "launch no subagents of your runtime's own",
+                    ToolClass::Write => "write no files",
+                    ToolClass::Web => "do not use the web",
+                })
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+    }
+    out.push('\n');
+    out
+}
+
+/// The team's workflow as the orchestrator's briefing section.
+fn workflow_section(workflow: &Workflow, selection: Option<&[String]>) -> String {
+    let mut out = String::from(
+        "\n## Workflow\nThis team's style fixes the chain of cards one unit of work (a phase) goes \
+through. workflow_run(phase, title, brief) lays it on the board: one card per step, named \
+<step>-<phase>, assigned and chained as listed; the brief goes on every card, so put there what \
+the steps need to know (the goal, the scope, what came before). Run it once per unit, when the \
+unit before is done or when the unit does not depend on it.",
+    );
+    if !guardrails::crew_tool_allowed(selection, "task_create") {
+        out.push_str(" Cards go on the board through workflow_run and no other way.");
+    }
+    out.push('\n');
+    for (i, step) in workflow.steps.iter().enumerate() {
+        let _ = write!(out, "{}. {} → {}", i + 1, step.id, step.agent);
+        if let Some(reviewer) = &step.reviewer {
+            let _ = write!(out, ", reviewed by {reviewer}");
+        }
+        if !step.depends_on.is_empty() {
+            let _ = write!(out, ", after {}", step.depends_on.join(" and "));
+        }
+        if !step.produces.is_empty() {
+            let _ = write!(out, " (produces {})", step.produces.join(", "));
+        }
+        out.push('\n');
+    }
+    out
 }
 
 /// The team's standing instructions (its work style), as a briefing section.
@@ -62,10 +195,28 @@ fn roster(view: &TeamView<'_>, me: &str) -> String {
             agent.role.as_str()
         };
         let temporary = if agent.temporary { " (temporary)" } else { "" };
-        let _ = writeln!(out, "- {}{you}{temporary} — {role}", agent.id);
+        // What a member can do with its hands, where the style cut it down.
+        let tools = match view.rules.tools_of(&agent.id) {
+            Some([]) => " · tools: none".to_string(),
+            Some(classes) => format!(
+                " · tools: {}",
+                classes
+                    .iter()
+                    .map(|c| c.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            None => String::new(),
+        };
+        let _ = writeln!(out, "- {}{you}{temporary} — {role}{tools}", agent.id);
     }
     out
 }
+
+/// The orchestrator's line about workflow_run, offered with a workflow.
+const TOOL_WORKFLOW: &str = "\
+- workflow_run(phase, title, brief) — lay the team's workflow on the board for one unit of work: \
+one card per step, named <step>-<phase>, assigned and chained as the workflow says (see Workflow).";
 
 const TOOLS_COMMON: &str = "\
 - agents_list() — who is on the team, their role, status and current task.
@@ -77,6 +228,9 @@ waking it.
 sent or received).
 - agent_compact(keep?) — compact your own conversation when your context window is filling up; \
 it happens when the current turn ends, and you are pointed back to your task afterwards.
+- agent_clear(note?) — start your context afresh when the turn ends: a new session with nothing \
+of this one kept, your open card handed to it again. For when what came before no longer matters \
+(a card finished, the next unrelated): cheaper than a compaction, which keeps a summary.
 - tasks_list(done?) — the board: open tasks in full, done ones one line each; done: true shows \
 them in full too.
 - task_get(id?) — one task's card: what is to be done, the results and commits it builds on, its \
@@ -245,15 +399,11 @@ back to {parent}. You cannot launch subagents yourself."
     }
     let _ = write!(out, "\n## Team\n{}", roster(view, &me.id));
     out.push_str(&working_style(view));
-    let _ = write!(
-        out,
-        "\n## Coordination\n\
-You have a `crew` MCP server. Its tools are the only way to reach your teammates:\n\
-{TOOLS_COMMON}\n{TOOLS_WORKER}\n\n\
-Your work is on a board of task cards. A [crew] task message names your card by id; \
-task_get reads it (the work, the results it builds on, its reviewer), and reads any other card \
-by its id. Refer to work by id in the same way (a task, a message, a commit) instead of \
-restating it.\n\n\
+    let selection = view.rules.crew_tools_of(&me.id);
+    let common = tool_lines(TOOLS_COMMON, selection);
+    let worker = tool_lines(TOOLS_WORKER, selection);
+    let talking = match view.rules.messaging {
+        Messaging::Open => "\
 Talk to teammates directly, as you would to a person; crew carries the words over:\n\
 - The reply you end a turn with goes back to the teammate whose question or message started \
 it, as your answer. No tool needed.\n\
@@ -263,7 +413,38 @@ line goes to each of them, and their answers come back.\n\
 - agent_send is for the rest: a typed message (an artifact, a review request), a broadcast, \
 or something to say mid-turn.\n\
 If your work affects another agent, or you need something from one, talk to it yourself: \
-the orchestrator is not a relay.\n\n\
+the orchestrator is not a relay.\n\n"
+            .to_string(),
+        Messaging::Hub => {
+            let hub = me.parent.clone().unwrap_or_else(|| {
+                view.agents
+                    .iter()
+                    .find(|a| a.orchestrator)
+                    .map(|a| a.id.clone())
+                    .unwrap_or_else(|| "operator".to_string())
+            });
+            format!(
+                "This team's members write to {hub} only, never to one another (crew refuses the \
+rest):\n\
+- The reply you end a turn with goes back to {hub} when its question or message started the \
+turn, as your answer. No tool needed.\n\
+- A line of that reply addressed to a teammate (`@<id>:`) is carried to {hub} instead, marked \
+for whom it was; a message sent to a teammate is refused. What a teammate needs from you goes on \
+your card (task_complete's result, your commits) or to {hub}, which carries it on.\n\
+- Reviews come to you from the board, as [crew] review requests; answer them with review_submit.\n\n"
+            )
+        }
+    };
+    let _ = write!(
+        out,
+        "\n## Coordination\n\
+You have a `crew` MCP server. Its tools are the only way to reach your teammates:\n\
+{common}\n{worker}\n\n\
+Your work is on a board of task cards. A [crew] task message names your card by id; \
+task_get reads it (the work, the results it builds on, its reviewer), and reads any other card \
+by its id. Refer to work by id in the same way (a task, a message, a commit) instead of \
+restating it.\n\n\
+{talking}\
 Every response you make sends your whole conversation to the model again, so each tool call \
 that waits for the one before costs that much. Make the calls that do not depend on one \
 another together, in one response (a message and a status; a commit and the next read), and \
@@ -274,6 +455,7 @@ They come from your teammates or the crew scheduler, not from a human. Act on th
     );
     out.push_str(&writing_to_agents(view.voice));
     out.push_str(&worker_questions(view, me));
+    out.push_str(&tools_section(me, view.rules.tools_of(&me.id)));
     if view.worktrees && view.vcs == crate::vcs::Kind::Jj {
         let branch = me.branch.as_deref().unwrap_or("your own branch");
         let _ = write!(
@@ -385,17 +567,39 @@ pub fn orchestrator_briefing(view: &TeamView<'_>) -> String {
     let _ = write!(out, "\n## Team\n{}", roster(view, ORCHESTRATOR_ID));
     out.push_str(&working_style(view));
     out.push_str(view.models);
+    let selection = view.rules.crew_tools_of(ORCHESTRATOR_ID);
+    let common = tool_lines(TOOLS_COMMON, selection);
+    let mut orchestrator = tool_lines(TOOLS_ORCHESTRATOR, selection);
+    if view.rules.workflow.is_some() && guardrails::crew_tool_allowed(selection, "workflow_run") {
+        orchestrator.push('\n');
+        orchestrator.push_str(TOOL_WORKFLOW);
+    }
+    let created = if view.rules.workflow.is_some() {
+        "workflow_run (see Workflow)"
+    } else {
+        "task_create"
+    };
+    let between = match view.rules.messaging {
+        Messaging::Open => {
+            "Workers message each other directly — you are not in the \
+loop for their conversations and must not act as a relay."
+        }
+        Messaging::Hub => {
+            "Members write to you only, never to one another (crew refuses the \
+rest): what one needs from another, you carry (a message, or task_edit), and a part of a reply a \
+member addressed to a teammate reaches you instead, marked for whom it was."
+        }
+    };
     let _ = write!(
         out,
         "\n## How the team runs\n\
 Work is a board of task cards, ordered by their dependencies. A card is written once, with \
-task_create; the crew scheduler hands it to its agent by id as soon as its dependencies are \
+{created}; the crew scheduler hands it to its agent by id as soon as its dependencies are \
 done, and the agent reads it with task_get. So you never relay task assignments or repeat \
 what a card says: refer to work by id (a task, a message, a commit), and change a task with \
-task_edit rather than a message. Workers message each other directly — you are not in the \
-loop for their conversations and must not act as a relay.\n\n\
+task_edit rather than a message. {between}\n\n\
 You have a `crew` MCP server with these tools:\n\
-{TOOLS_COMMON}\n{TOOLS_ORCHESTRATOR}\n\n\
+{common}\n{orchestrator}\n\n\
 Every response you make sends your whole conversation to the model again, so each tool call \
 that waits for the one before costs that much. Make the calls that do not depend on one \
 another together, in one response (the cards of a plan, a card and its assignment), and do not \
@@ -449,7 +653,11 @@ runtime at whatever moment that happens, with no say in what is kept. Better: at
 break (between tasks, after a commit, while an agent waits) queue it yourself with \
 agent_compact(id, keep), naming what the summary must keep. For your own window keep the plan, \
 who is doing what, decisions made and questions still open. Do not compact an agent in the \
-middle of delicate work, or one whose window has plenty of room.\n\
+middle of delicate work, or one whose window has plenty of room. When nothing of a member's \
+conversation matters any more (its card is done and the next is unrelated, or it has no card), \
+agent_clear(id) instead of compacting: a fresh session, nothing kept and nothing carried, where \
+a compaction's summary travels with every later request. A member with no open card whose window \
+fills up is cleared by crew itself. Your own window is never cleared: it holds the plan.\n\
 6. Conclude. When every task is done you are told so; call session_complete with a \
 concise final report: what was built, by whom, and the commits or artifacts. Whatever is left \
 for the operator to decide goes in its `decisions`, one per entry: each is then asked of them and \
@@ -457,6 +665,9 @@ the dashboard shows that the team waits for their answer. A decision that is onl
 the report or in your terminal is not seen as a request.\n\n\
 Do not do the workers' tasks yourself and do not edit files.\n"
     );
+    if let Some(workflow) = view.rules.workflow {
+        out.push_str(&workflow_section(workflow, selection));
+    }
     out.push_str(&writing_as_orchestrator(view.voice));
     out
 }
@@ -928,6 +1139,7 @@ mod tests {
                     worktrees: true,
                     vcs,
                     voice: Voice::default(),
+                    rules: Rules::default(),
                 },
                 &agents[1],
             )
@@ -960,6 +1172,7 @@ mod tests {
             worktrees: true,
             vcs: crate::vcs::Kind::Git,
             voice,
+            rules: Rules::default(),
         };
         let member = worker_briefing(&view(Voice::default()), &agents[1]);
         assert!(
@@ -1013,6 +1226,7 @@ mod tests {
             worktrees: true,
             vcs: crate::vcs::Kind::Git,
             voice: Voice::default(),
+            rules: Rules::default(),
         };
         let text = worker_briefing(&view, &agents[1]);
         assert!(!text.contains("How this team works"));
@@ -1099,6 +1313,131 @@ mod tests {
     }
 
     #[test]
+    fn the_styles_guardrails_are_told_as_they_are_enforced() {
+        use crew_core::guardrails::Step;
+        let agents = vec![
+            agent("orchestrator", "", true),
+            agent("researcher", "reads", false),
+            agent("planner", "plans", false),
+        ];
+        let tools = vec![(
+            "researcher".to_string(),
+            vec![ToolClass::Read, ToolClass::Web],
+        )];
+        let crew_tools = vec![
+            (
+                "researcher".to_string(),
+                vec!["messaging".to_string(), "git".to_string()],
+            ),
+            (
+                "orchestrator".to_string(),
+                vec!["workflow".to_string(), "task_edit".to_string()],
+            ),
+        ];
+        let workflow = Workflow {
+            steps: vec![
+                Step {
+                    id: "research".into(),
+                    agent: "researcher".into(),
+                    produces: vec![".planning/{phase}/RESEARCH.md".into()],
+                    description: "x".into(),
+                    ..Step::default()
+                },
+                Step {
+                    id: "plan".into(),
+                    agent: "planner".into(),
+                    reviewer: Some("researcher".into()),
+                    depends_on: vec!["research".into()],
+                    description: "y".into(),
+                    ..Step::default()
+                },
+            ],
+        };
+        let view = TeamView {
+            project: "demo",
+            objective: "Build it",
+            style: Some("gsd"),
+            instructions: "",
+            models: "",
+            agents: &agents,
+            worktrees: true,
+            vcs: crate::vcs::Kind::Git,
+            voice: Voice::default(),
+            rules: Rules {
+                messaging: Messaging::Hub,
+                workflow: Some(&workflow),
+                tools: &tools,
+                crew_tools: &crew_tools,
+            },
+        };
+        let member = worker_briefing(&view, &agents[1]);
+        assert!(
+            member.contains("write to orchestrator only, never to one another"),
+            "{member}"
+        );
+        assert!(!member.contains("the orchestrator is not a relay"));
+        // Only the crew tools it has are listed.
+        assert!(member.contains("- agent_send(") && member.contains("- git_commit("));
+        assert!(!member.contains("- agent_spawn(") && !member.contains("- review_submit("));
+        assert!(member.contains("- task_complete("), "never taken away");
+        assert!(
+            member.contains(
+                "## Tools\nThis team's style cuts your runtime's own tools down to: read and \
+search files; fetch pages and search the web. You do not create and edit files; or run \
+commands; or launch subagents of your runtime's own: your session was started without those \
+tools.\n"
+            ),
+            "{member}"
+        );
+        assert!(
+            member.contains("- researcher (you) — reads · tools: read, web\n"),
+            "{member}"
+        );
+        // A member the style leaves alone reads nothing of it.
+        let planner = worker_briefing(&view, &agents[2]);
+        assert!(!planner.contains("## Tools") && planner.contains("- agent_spawn("));
+        // On Codex the shell stays: the member is told what it is for.
+        let mut codex = agents[1].clone();
+        codex.runtime = crew_core::RuntimeKind::Codex;
+        let text = worker_briefing(&view, &codex);
+        assert!(
+            text.contains(
+                "the shell is for reading and running, never for writing files or the web"
+            ),
+            "{text}"
+        );
+
+        let lead = orchestrator_briefing(&view);
+        assert!(
+            lead.contains("Members write to you only, never to one another"),
+            "{lead}"
+        );
+        assert!(
+            lead.contains("- workflow_run(phase, title, brief)"),
+            "{lead}"
+        );
+        assert!(!lead.contains("- task_create(") && lead.contains("- task_edit("));
+        assert!(lead.contains("A card is written once, with workflow_run (see Workflow)"));
+        assert!(
+            lead.contains("## Workflow\n")
+                && lead.contains(
+                    "Cards go on the board through workflow_run and no other way.\n\
+1. research → researcher (produces .planning/{phase}/RESEARCH.md)\n\
+2. plan → planner, reviewed by researcher, after research\n"
+                ),
+            "{lead}"
+        );
+        assert!(lead.contains("- researcher — reads · tools: read, web\n"));
+        // With open messaging and no workflow, nothing of this appears.
+        let plain = orchestrator_briefing(&TeamView {
+            rules: Rules::default(),
+            ..view
+        });
+        assert!(!plain.contains("workflow_run") && plain.contains("- task_create("));
+        assert!(plain.contains("must not act as a relay"));
+    }
+
+    #[test]
     fn orchestrator_briefing_forbids_relaying() {
         let agents = vec![agent("orchestrator", "", true), agent("a", "x", false)];
         let text = orchestrator_briefing(&TeamView {
@@ -1111,6 +1450,7 @@ mod tests {
             worktrees: true,
             vcs: crate::vcs::Kind::Git,
             voice: Voice::default(),
+            rules: Rules::default(),
         });
         assert!(text.contains("must not act as a relay"));
         // The model catalog sits between the roster and the working rules.

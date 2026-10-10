@@ -19,6 +19,7 @@
 use std::path::Path;
 
 use anyhow::Result;
+use crew_core::guardrails::ToolClass;
 use crew_core::paths::{write_private_file, IDENTITY_ENV};
 use crew_core::toolbox::{Item, ItemKind, ItemRef, Resolved};
 use crew_core::util::{one_line, truncate_chars};
@@ -33,6 +34,23 @@ const EXTENSION_FILE: &str = "crew-pi.ts";
 /// Where the agent's sessions are kept: a directory per agent, so `--continue`
 /// resumes this agent's session and nobody else's.
 const SESSIONS_DIR: &str = "pi-sessions";
+
+/// pi's built-in tools by class (pi 1.1). It has no built-in web or
+/// subagent tools, so those classes take nothing away.
+const PI_TOOLS: &[(ToolClass, &[&str])] = &[
+    (ToolClass::Read, &["read", "grep", "find", "ls"]),
+    (ToolClass::Write, &["edit", "write"]),
+    (ToolClass::Shell, &["bash"]),
+];
+
+/// The built-ins a member that gets `classes` does without.
+pub(crate) fn pi_excluded_tools(classes: &[ToolClass]) -> Vec<&'static str> {
+    PI_TOOLS
+        .iter()
+        .filter(|(class, _)| !classes.contains(class))
+        .flat_map(|(_, names)| names.iter().copied())
+        .collect()
+}
 /// Where pi keeps its settings, models and credentials.
 pub const AGENT_DIR_ENV: &str = "PI_CODING_AGENT_DIR";
 
@@ -438,6 +456,14 @@ impl AgentRuntime for PiRuntime {
                 ]);
             }
         }
+        // The style's cut of the built-in tools, as exclusions: `--tools`
+        // would replace the whole selection, crew's extension tools included.
+        if let Some(classes) = &ctx.settings.tools {
+            let excluded = pi_excluded_tools(classes);
+            if !excluded.is_empty() {
+                args.extend(["--exclude-tools".into(), excluded.join(",")]);
+            }
+        }
         // Created the first time, opened on every restart.
         if let Some(id) = &ctx.agent.session_id {
             args.push("--session-id".into());
@@ -817,6 +843,48 @@ mod tests {
             .collect();
         assert_eq!(all.len(), 1, "{all:?}");
         assert_eq!(all[0].1, home.join("pi").to_str().unwrap());
+    }
+
+    #[test]
+    fn the_styles_cut_of_the_built_in_tools_excludes_them_and_keeps_the_extensions() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = agent(dir.path());
+        let identity = dir.path().join("identity.json");
+        let launch = |tools: Option<Vec<ToolClass>>| {
+            let settings = AgentSettings {
+                tools,
+                ..AgentSettings::default()
+            };
+            PiRuntime
+                .launch(&LaunchContext {
+                    agent: &agent,
+                    settings: &settings,
+                    crew_bin: Path::new("/opt/crew"),
+                    agent_dir: dir.path(),
+                    identity_path: &identity,
+                    briefing: "be helpful",
+                    resume: false,
+                    endpoint: &Endpoint::default(),
+                    long_context: false,
+                    private_home: None,
+                })
+                .unwrap()
+                .args
+        };
+        assert!(!launch(None).iter().any(|a| a == "--exclude-tools"));
+        // Everything pi has built in: nothing to exclude.
+        assert!(!launch(Some(ToolClass::ALL.to_vec()))
+            .iter()
+            .any(|a| a == "--exclude-tools"));
+        let args = launch(Some(vec![ToolClass::Read, ToolClass::Web]));
+        let at = args.iter().position(|a| a == "--exclude-tools").unwrap();
+        assert_eq!(args[at + 1], "edit,write,bash");
+        // Exclusions, not `--tools`: that would drop the crew extension's tools.
+        assert!(!args.iter().any(|a| a == "--tools"));
+        assert_eq!(
+            pi_excluded_tools(&[]),
+            ["read", "grep", "find", "ls", "edit", "write", "bash"]
+        );
     }
 
     #[test]

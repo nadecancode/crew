@@ -52,6 +52,11 @@ pub struct Identity {
     /// answers (prompt cache, notes/toolboxes.md rule 4).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub orchestrator: bool,
+    /// The crew tools the agent gets, when its team's style takes some away
+    /// (`crew_tools`): its MCP server offers these and no other. Left out,
+    /// all the tools of its kind. Recorded at launch, like `orchestrator`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<String>>,
 }
 
 impl Identity {

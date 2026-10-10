@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use crew_core::config::{AgentDefaults, AgentSpec};
+use crew_core::guardrails::ToolClass;
 use crew_core::{Agent, Message, RuntimeKind, Usage};
 
 use crate::endpoints::Endpoint;
@@ -60,10 +61,37 @@ pub struct AgentSettings {
     pub toolbox: crew_core::toolbox::Resolved,
     #[serde(skip)]
     pub toolbox_launch: Option<toolbox::RuntimeToolbox>,
+    /// The classes of the runtime's own tools the member gets
+    /// (`agents[].tools`); `None` leaves them all.
+    #[serde(default)]
+    pub tools: Option<Vec<ToolClass>>,
+    /// Each card starts in a fresh session (`context: fresh`).
+    #[serde(default)]
+    pub fresh_context: bool,
 }
 
 fn default_true() -> bool {
     true
+}
+
+/// The classes `tools` leaves out that `runtime` cannot take away, so the
+/// member is told instead: Codex reads files through its shell and has no
+/// switch for its subagents; pi has no built-in web or subagent tools, so
+/// there is nothing to take. Claude Code's `--tools` covers every class.
+pub fn unenforced(runtime: RuntimeKind, tools: &[ToolClass]) -> Vec<ToolClass> {
+    crew_core::guardrails::missing_classes(tools)
+        .into_iter()
+        .filter(|class| match runtime {
+            RuntimeKind::Codex => {
+                matches!(
+                    class,
+                    ToolClass::Read | ToolClass::Shell | ToolClass::Agents
+                )
+            }
+            RuntimeKind::Shell => true,
+            RuntimeKind::Claude | RuntimeKind::Pi => false,
+        })
+        .collect()
 }
 
 impl AgentSettings {
@@ -96,6 +124,9 @@ impl AgentSettings {
             voice: defaults.voice,
             toolbox: crew_core::toolbox::Resolved::default(),
             toolbox_launch: None,
+            tools: spec.tools.clone(),
+            fresh_context: spec.context.unwrap_or(defaults.context)
+                == crew_core::config::ContextPolicy::Fresh,
         }
     }
 }
@@ -341,7 +372,45 @@ mod tests {
         assert_eq!(s.permission_mode, "plan");
         assert_eq!(s.allowed_tools, ["Bash(cargo test:*)", "WebFetch"]);
         assert_eq!(s.sandbox, "workspace-write");
+        assert_eq!(s.tools, None, "every built-in tool, unless the style says");
         let s = AgentSettings::resolve(&defaults, &AgentSpec::default());
         assert_eq!(s.permission_mode, "acceptEdits");
+        let cut = AgentSpec {
+            tools: Some(vec![ToolClass::Read, ToolClass::Web]),
+            ..AgentSpec::default()
+        };
+        assert_eq!(
+            AgentSettings::resolve(&defaults, &cut).tools.as_deref(),
+            Some(&[ToolClass::Read, ToolClass::Web][..])
+        );
+        // The conversation is kept between cards unless the style says.
+        assert!(!AgentSettings::resolve(&defaults, &cut).fresh_context);
+        let fresh_team = AgentDefaults {
+            context: crew_core::config::ContextPolicy::Fresh,
+            ..AgentDefaults::default()
+        };
+        assert!(AgentSettings::resolve(&fresh_team, &cut).fresh_context);
+        let keeps = AgentSpec {
+            context: Some(crew_core::config::ContextPolicy::Keep),
+            ..AgentSpec::default()
+        };
+        assert!(!AgentSettings::resolve(&fresh_team, &keeps).fresh_context);
+    }
+
+    #[test]
+    fn what_a_runtime_cannot_take_away_is_named_so_the_member_can_be_told() {
+        let read_only = [ToolClass::Read];
+        assert!(unenforced(RuntimeKind::Claude, &read_only).is_empty());
+        assert!(unenforced(RuntimeKind::Pi, &read_only).is_empty());
+        // Codex's shell is how it reads, and its subagents have no switch.
+        assert_eq!(
+            unenforced(RuntimeKind::Codex, &read_only),
+            [ToolClass::Shell, ToolClass::Agents]
+        );
+        assert_eq!(
+            unenforced(RuntimeKind::Codex, &[ToolClass::Write, ToolClass::Shell]),
+            [ToolClass::Read, ToolClass::Agents]
+        );
+        assert!(unenforced(RuntimeKind::Codex, &ToolClass::ALL).is_empty());
     }
 }

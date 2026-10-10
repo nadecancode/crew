@@ -8,6 +8,7 @@
 //! cached with it and Codex puts them back after a compaction.
 
 use anyhow::{bail, Result};
+use crew_core::guardrails::ToolClass;
 use crew_core::paths::IDENTITY_ENV;
 use crew_core::RuntimeKind;
 use serde_json::{json, Value};
@@ -144,6 +145,15 @@ impl AgentRuntime for CodexRuntime {
             "notify",
             json!([crew_bin, "hook", "codex-notify", "--identity", identity]),
         );
+        // The style's cut of the built-in tools, as far as Codex has
+        // switches: no web search; no writes means a read-only sandbox
+        // (below). Its shell is how it reads files, so that stays, as do its
+        // own subagents (agents::unenforced names what the member is told).
+        let tools = ctx.settings.tools.as_deref();
+        if tools.is_some_and(|classes| !classes.contains(&ToolClass::Web)) {
+            set("web_search", json!("disabled"));
+        }
+        let read_only = tools.is_some_and(|classes| !classes.contains(&ToolClass::Write));
         // The standing instructions (who the agent is, its role, the team,
         // the tools) go into the system prompt, after whatever the user's own
         // config puts there, rather than into a prompt of their own.
@@ -229,7 +239,9 @@ impl AgentRuntime for CodexRuntime {
         // The same permissions as configuration, for the app-server: it owns
         // the session when there is one, and Codex refuses permission flags
         // on a TUI that resumes a session held by a server.
-        let sandbox = if ctx.settings.bypass_permissions {
+        let sandbox = if read_only {
+            "read-only"
+        } else if ctx.settings.bypass_permissions {
             "danger-full-access"
         } else if ctx.settings.sandbox.is_empty() {
             "workspace-write"
@@ -293,11 +305,14 @@ impl AgentRuntime for CodexRuntime {
         args.extend(overrides);
         if ctx.resume && sidecar.is_some() {
             // The server already holds the session with its permissions.
-        } else if ctx.settings.bypass_permissions {
+        } else if ctx.settings.bypass_permissions && !read_only {
             // Codex's "yolo" mode: no approvals and no sandbox.
             args.push("--dangerously-bypass-approvals-and-sandbox".into());
         } else {
-            if !ctx.settings.sandbox.is_empty() {
+            if read_only {
+                args.push("--sandbox".into());
+                args.push("read-only".into());
+            } else if !ctx.settings.sandbox.is_empty() {
                 args.push("--sandbox".into());
                 args.push(ctx.settings.sandbox.clone());
             }
@@ -928,6 +943,68 @@ mod tests {
             .env
             .contains(&("OPENAI_API_KEY".into(), "sk-codex-value".into())));
         assert!(!sidecar.args.iter().any(|a| a.contains("sk-codex-value")));
+    }
+
+    #[test]
+    fn a_member_without_writes_runs_in_a_read_only_sandbox_whatever_the_permission_policy() {
+        let agent = agent();
+        let launch = |tools: Option<Vec<ToolClass>>, bypass: bool| {
+            CodexRuntime
+                .launch(&LaunchContext {
+                    agent: &agent,
+                    settings: &AgentSettings {
+                        bypass_permissions: bypass,
+                        sandbox: "workspace-write".into(),
+                        socket_delivery: true,
+                        tools,
+                        ..AgentSettings::default()
+                    },
+                    crew_bin: Path::new("/bin/crew"),
+                    agent_dir: Path::new("/state/agents/codex-1"),
+                    identity_path: Path::new("/state/agents/codex-1/identity.json"),
+                    briefing: "standing instructions",
+                    resume: false,
+                    endpoint: &Endpoint::default(),
+                    long_context: false,
+                    private_home: None,
+                })
+                .unwrap()
+        };
+        let reader = launch(Some(vec![ToolClass::Read, ToolClass::Shell]), true);
+        let joined = reader.args.join(" ");
+        assert!(
+            !joined.contains("--dangerously-bypass-approvals-and-sandbox"),
+            "{joined}"
+        );
+        assert!(joined.contains("--sandbox read-only"), "{joined}");
+        assert!(joined.contains("--ask-for-approval never"), "{joined}");
+        let server = reader.sidecar.unwrap().args.join(" ");
+        assert!(server.contains(r#"sandbox_mode="read-only""#), "{server}");
+        assert!(server.contains(r#"web_search="disabled""#), "{server}");
+
+        // With writes and the web, the policy decides as before.
+        let writer = launch(Some(ToolClass::ALL.to_vec()), true);
+        let joined = writer.args.join(" ");
+        assert!(
+            joined.contains("--dangerously-bypass-approvals-and-sandbox"),
+            "{joined}"
+        );
+        assert!(!joined.contains("read-only"), "{joined}");
+        let server = writer.sidecar.unwrap().args.join(" ");
+        assert!(!server.contains("web_search"), "{server}");
+        assert!(
+            server.contains(r#"sandbox_mode="danger-full-access""#),
+            "{server}"
+        );
+        let guarded = launch(Some(vec![ToolClass::Write, ToolClass::Shell]), false);
+        let joined = guarded.args.join(" ");
+        assert!(joined.contains("--sandbox workspace-write"), "{joined}");
+        assert!(guarded
+            .sidecar
+            .unwrap()
+            .args
+            .join(" ")
+            .contains(r#"web_search="disabled""#));
     }
 
     #[test]

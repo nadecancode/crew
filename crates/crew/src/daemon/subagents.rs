@@ -48,7 +48,7 @@ impl Daemon {
                 "the task description is limited to {MAX_TASK_CHARS} characters"
             )));
         }
-        let (team, parent, worktrees, backend, id, command) = {
+        let (team, parent, worktrees, backend, id, command, tools, crew_tools) = {
             let mut model_guard = self.model();
             let team = model_guard
                 .session
@@ -107,6 +107,13 @@ to finish",
                 .get(parent_id)
                 .map(|l| l.settings.command.clone())
                 .unwrap_or_default();
+            // A subagent gets its parent's guardrails: a member cannot
+            // launch more than it has.
+            let (tools, crew_tools) = model_guard
+                .local
+                .get(parent_id)
+                .map(|l| (l.spec.tools.clone(), l.spec.crew_tools.clone()))
+                .unwrap_or_default();
             // Taken before anything is awaited (see add_agent).
             model_guard.reserved.insert(id.clone());
             (
@@ -116,6 +123,8 @@ to finish",
                 model_guard.session.backend.clone(),
                 id,
                 command,
+                tools,
+                crew_tools,
             )
         };
         let _reserved = IdReservation::new(self, &id);
@@ -136,6 +145,8 @@ to finish",
             } else {
                 Vec::new()
             },
+            tools,
+            crew_tools,
             ..AgentSpec::default()
         };
         validate_agent_spec(&spec).map_err(|e| RpcError::invalid(e.to_string()))?;

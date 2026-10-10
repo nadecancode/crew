@@ -351,7 +351,21 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
         };
         let mut sent = false;
         let mut answered: Vec<String> = Vec::new();
+        // Under hub messaging a part for a teammate goes to whoever the
+        // agent reports to instead, marked for whom it was: one message
+        // per text, however many it named.
+        let mut redirected: Vec<(Vec<String>, String)> = Vec::new();
+        let mut redirect =
+            |to: &str, text: &str| match redirected.iter_mut().find(|(_, t)| t == text) {
+                Some((names, _)) => names.push(to.to_string()),
+                None => redirected.push((vec![to.to_string()], text.to_string())),
+            };
         for (to, text) in parts {
+            if self.may_write(id, &to).is_err() {
+                redirect(&to, &text);
+                answered.push(to);
+                continue;
+            }
             let reply_to = asked_by(&to);
             let (kind, via) = if reply_to.is_some() {
                 (MessageType::Answer, "reply")
@@ -377,6 +391,10 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
                 if answered.iter().any(|a| a == to) || wrote_to(to) {
                     continue;
                 }
+                if self.may_write(id, to).is_err() {
+                    redirect(to, &lead);
+                    continue;
+                }
                 if self
                     .forward(
                         id,
@@ -385,6 +403,29 @@ guidelines or usage policies, call decline(reason), and crew hands it to another
                         &lead,
                         asked_by(to),
                         "reply",
+                        &history,
+                    )
+                    .await
+                {
+                    sent = true;
+                }
+            }
+        }
+        if !redirected.is_empty() {
+            let hub = self.hub_of(id);
+            for (names, text) in redirected {
+                let body = format!(
+                    "(for {}: this team's members write to you only)\n{text}",
+                    names.join(", ")
+                );
+                if self
+                    .forward(
+                        id,
+                        &hub,
+                        MessageType::Message,
+                        &body,
+                        None,
+                        "mention",
                         &history,
                     )
                     .await

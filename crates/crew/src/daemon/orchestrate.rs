@@ -1115,6 +1115,7 @@ yourself"
         self.project_task(&author);
         if was_current {
             self.settle(&author);
+            self.clear_after_card(&author, &updated.id).await;
         }
         self.replan();
         Ok(updated)
@@ -1306,6 +1307,7 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         if let Some(agent) = task.assigned_agent.as_ref().filter(|_| was_current) {
             self.model().rt(agent).self_status = None;
             self.settle(agent);
+            self.clear_after_card(agent, &task.id).await;
         }
         self.model()
             .task(&task.id)
@@ -1323,6 +1325,13 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         task_id: Option<String>,
         note: Option<String>,
     ) -> Result<SendResult, RpcError> {
+        if let Who::Agent(id) = who {
+            self.may_write(id, &agent_id).map_err(|why| {
+                RpcError::forbidden(format!(
+                    "{why}; reviews come from the board: the orchestrator sets a card's reviewer"
+                ))
+            })?;
+        }
         let mut body = format!("Please review: {}", artifact.trim());
         if let Some(note) = note.filter(|n| !n.trim().is_empty()) {
             body.push_str(&format!("\n\n{}", note.trim()));

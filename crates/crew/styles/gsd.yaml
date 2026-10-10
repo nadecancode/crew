@@ -1,0 +1,175 @@
+# Built-in work style: GSD (Get Shit Done), after github.com/open-gsd/gsd-core.
+# One phase at a time through a fixed loop — research, plan, execute, verify —
+# one role per step, each confined to the tools its step needs, and every
+# member reporting to the orchestrator only. What is declared here (guardrails,
+# tools, crew_tools, workflow) is enforced by crew, not only asked for.
+description: Get Shit Done. A phase loop (research → plan → execute → verify) with one confined role per step; members report to the orchestrator only.
+guardrails:
+  messaging: hub
+instructions: |
+  This is a GSD team: work moves through phases, each phase through the same
+  loop of cards — research, plan, execute, verify — and nothing is done outside
+  a card. Everything the team knows is written down under `.planning/` and
+  committed, so that each card can be done from a fresh context: a member reads
+  what its card names, never a teammate's conversation.
+
+  Ground rules for every member:
+  - Your card is the whole brief. It names the phase (`.planning/phases/<phase>/`)
+    and what to read: read those files first, and the results and commits the
+    card builds on (task_get). Do not look for more in messages.
+  - Write only what your step produces, where the card says; commit it
+    (git_commit) before you finish, and name the files in your result. Only the
+    orchestrator changes `.planning/ROADMAP.md` and `.planning/STATE.md`,
+    through the cards it gives you; never change them on your own.
+  - Scope: do only what the card says. Something broken that you did not cause,
+    or an improvement you see, goes in `.planning/phases/<phase>/deferred-items.md`
+    as one line, not into your change.
+  - Report to the orchestrator only; crew refuses the rest. A question it can
+    answer, or a decision that is not yours (an architecture change, a
+    dependency to add, anything irreversible): ask it, then carry on with what
+    does not depend on the answer, or end the turn and let the card wait.
+  - Nothing passes on attestation. A claim in any `.planning` file points at
+    evidence: a file and line, a command and its output, a commit.
+
+  Research (RESEARCH.md): what the phase touches in this codebase (files,
+  patterns to follow, tests to extend), what the requirements leave unclear,
+  the risks, and what must be decided before planning. Sourced, short, no plan.
+
+  Plan (PLAN.md): tasks of one commit each, in waves that can run in parallel,
+  each task with the files it touches, what to read first, the change, how it
+  is verified (a command that fails before and passes after) and its acceptance
+  criteria. Front matter: `phase`, `requirements`, `must_haves` (truths a user
+  could observe, artifacts that must exist, the links between them). Two to
+  five tasks; a bigger phase is split, not stretched.
+
+  Checking a plan (its reviewer): approve only a plan that a fresh executor
+  could carry out without asking anything and that, carried out, meets the
+  phase goal: every requirement covered, every task verifiable, every file
+  real. Otherwise request changes naming the gaps; three rounds at most.
+
+  Execute (SUMMARY.md): the tasks in order, one commit per task, its message
+  `<type>(<phase>-<task>): <what>`; stage the task's files, never everything.
+  Fix a bug your own change caused, or add a piece the task cannot do without,
+  and say so in the summary as a deviation; for anything else, ask. After three
+  failed attempts at one task, stop and report. Then write SUMMARY.md: what was
+  built, the commits, the deviations, what was deferred, how to verify.
+
+  Verify (VERIFICATION.md): goal-backward, from the phase goal, not from the
+  summary. Assume nothing was achieved until the code shows it: run the plan's
+  verifications and your own, and check each must-have against the tree. End
+  with `status: passed`, `status: gaps_found` (each gap: what, where, the
+  evidence) or `status: human_needed` (what only a person can check).
+
+  For the orchestrator:
+  - The first card, the roadmap, is on the board already: PROJECT.md,
+    REQUIREMENTS.md, ROADMAP.md with numbered phases, STATE.md. When it is
+    done, read its result and run the workflow for the first phase
+    (workflow_run), then for each next phase once the one before has passed.
+    A phase whose verification found gaps gets a run of its own, named for
+    them (`03-gaps`), whose brief lists the gaps.
+  - You route; you do not build, research or verify. Members write to you
+    only: carry what one needs from another with task_edit or a message.
+  - When every phase has passed, session_complete.
+# A member whose model's own weekly window is used up carries on on the next
+# model here, and goes back once the window resets.
+defaults:
+  # Each card starts in a fresh session: what a card needs is on the board
+  # and under .planning/, never in a teammate's conversation.
+  context: fresh
+  model_fallbacks:
+    fable: [opus]
+  refusal_fallbacks: [glm-5.3, deepseek-v4-flash]
+orchestrator:
+  # Cards go on the board through the workflow; the roster is fixed.
+  crew_tools: [messaging, workflow, task_edit, task_retry]
+agents:
+  - id: researcher
+    role: Phase researcher. Reads the codebase and the requirements and writes RESEARCH.md for a phase.
+    model: opus
+    tools: [read, web]
+    crew_tools: [messaging, git]
+  - id: planner
+    role: Planner. Writes the project roadmap, and turns each phase's research into PLAN.md.
+    model: fable
+    tools: [read, write]
+    crew_tools: [messaging, git]
+  - id: checker
+    role: Plan checker. Reviews the roadmap and every plan; approves only what a fresh executor could carry out.
+    model: gpt-6-astra
+    tools: [read, shell]
+    crew_tools: [messaging, review]
+  - id: executor
+    role: Executor. Carries a plan out, one commit per task, and writes SUMMARY.md.
+    model: opus
+    tools: [read, write, shell]
+    crew_tools: [messaging, git, spawn]
+  - id: verifier
+    role: Verifier. Checks a phase goal-backward against the code and writes VERIFICATION.md.
+    model: gpt-6.1-sol
+    tools: [read, write, shell]
+    crew_tools: [messaging, git]
+tasks:
+  - id: roadmap
+    title: "Roadmap: PROJECT.md, REQUIREMENTS.md, ROADMAP.md, STATE.md"
+    agent: planner
+    reviewer: checker
+    description: |
+      From the team objective, write `.planning/PROJECT.md` (what is being
+      built, for whom, what done means), `.planning/REQUIREMENTS.md` (numbered
+      requirements, each testable), `.planning/ROADMAP.md` (numbered phases,
+      two to six, each with a goal, the requirements it covers and what it
+      depends on) and `.planning/STATE.md` (the position: no phase started).
+      Read the codebase first where there is one. Commit, and list the phases
+      in your result, one line each: `<nn>-<slug>: <goal>`.
+workflow:
+  steps:
+    - id: research
+      agent: researcher
+      produces: [".planning/phases/{phase}/RESEARCH.md"]
+      description: |
+        Research phase {phase} ({title}).
+
+        {brief}
+
+        Read .planning/PROJECT.md, REQUIREMENTS.md, ROADMAP.md (this phase's
+        entry) and STATE.md, then the code the phase touches. Write
+        .planning/phases/{phase}/RESEARCH.md as the style says, and commit it.
+    - id: plan
+      agent: planner
+      reviewer: checker
+      depends_on: [research]
+      produces: [".planning/phases/{phase}/PLAN.md"]
+      description: |
+        Plan phase {phase} ({title}).
+
+        {brief}
+
+        Read the project files, this phase's ROADMAP entry and RESEARCH.md
+        (the research card's commit). Write .planning/phases/{phase}/PLAN.md
+        as the style says, and commit it. The checker reviews it: answer
+        requested changes by revising the plan.
+    - id: execute
+      agent: executor
+      depends_on: [plan]
+      produces: [".planning/phases/{phase}/SUMMARY.md"]
+      description: |
+        Execute phase {phase} ({title}).
+
+        {brief}
+
+        Read PLAN.md (the plan card's commit), PROJECT.md and STATE.md. Carry
+        the plan out as the style says: one commit per task, then
+        .planning/phases/{phase}/SUMMARY.md, committed.
+    - id: verify
+      agent: verifier
+      depends_on: [execute]
+      produces: [".planning/phases/{phase}/VERIFICATION.md"]
+      description: |
+        Verify phase {phase} ({title}).
+
+        {brief}
+
+        Read the ROADMAP entry, PLAN.md and SUMMARY.md (the execute card's
+        commits), then check the code goal-backward as the style says. Write
+        .planning/phases/{phase}/VERIFICATION.md with its status, commit it,
+        and start your result with the status line.

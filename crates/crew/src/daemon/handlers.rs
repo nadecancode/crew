@@ -268,6 +268,9 @@ change identity",
         if crew_core::rpc::features::feature_method(call.method()).is_some() {
             return self.dispatch_feature(conn, call).await;
         }
+        // The style's cut of a member's crew tools holds here, whatever
+        // asked (its MCP server, `crew ctl`).
+        self.check_crew_tool(&who, &call)?;
 
         match call {
             Call::Ping | Call::Hello(_) => unreachable!("handled above"),
@@ -377,6 +380,7 @@ change identity",
                 reply(crew_core::rpc::ModelsResult { models })
             }
             Call::AgentCompact { id, keep } => reply(self.compact_agent(&who, id, keep).await?),
+            Call::AgentClear { id, note } => reply(self.clear_agent(&who, id, note).await?),
             Call::AgentPause { id } => {
                 operator_only(&who)?;
                 self.pause_agent(&id, true).await?;
@@ -628,6 +632,14 @@ change identity",
                 self.privileged(&who)?;
                 reply(self.retry_task(&id)?)
             }
+            Call::WorkflowRun {
+                phase,
+                title,
+                brief,
+            } => {
+                self.privileged(&who)?;
+                reply(self.run_workflow(&phase, &title, &brief)?)
+            }
 
             Call::ReviewRequest {
                 agent_id,
@@ -819,6 +831,10 @@ change identity",
         who: &Who,
         mut params: SendParams,
     ) -> Result<SendResult, RpcError> {
+        if let Who::Agent(id) = who {
+            self.may_write(id, &params.to)
+                .map_err(RpcError::forbidden)?;
+        }
         if params.to == OPERATOR_ID && params.kind == MessageType::Question {
             self.check_operator_question(who, &mut params)?;
         }

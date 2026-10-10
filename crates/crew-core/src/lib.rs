@@ -4,6 +4,7 @@
 
 pub mod client;
 pub mod config;
+pub mod guardrails;
 pub mod output_view;
 pub mod paths;
 pub mod rpc;

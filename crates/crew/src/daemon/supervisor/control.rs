@@ -66,6 +66,16 @@ impl Daemon {
     /// session id and confirmation are dropped first, so nothing (this
     /// start, a later restart) goes back to it.
     pub(crate) async fn restart_agent_fresh(&self, id: &str) -> Result<(), RpcError> {
+        self.restart_agent_fresh_with(id, None).await
+    }
+
+    /// `restart_agent_fresh`, with `notice` as the first thing the new
+    /// session reads (before whatever is waiting for it).
+    pub(crate) async fn restart_agent_fresh_with(
+        &self,
+        id: &str,
+        notice: Option<String>,
+    ) -> Result<(), RpcError> {
         if self.model().agent(id).is_none() {
             return Err(RpcError::not_found(format!("no agent '{id}'")));
         }
@@ -77,7 +87,7 @@ impl Daemon {
         }
         self.save_local(id);
         self.update_agent(id, |a| a.session_id = None);
-        self.restart(id, None, Start::Fresh).await
+        self.restart(id, notice, Start::Fresh).await
     }
 
     /// Restart an agent, resuming its session; `notice` replaces the usual

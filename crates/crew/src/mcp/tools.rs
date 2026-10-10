@@ -124,6 +124,23 @@ agent is pointed back to its task and carries on.",
             false,
         ),
         tool(
+            "agent_clear",
+            "Start a context afresh: when the session's current turn ends it is replaced by a \
+new session of the same runtime and model with nothing of the conversation kept; the briefing is \
+in place as at any launch, an open card is handed to it again, and the note is the first thing it \
+reads. For when what came before does not matter (a card finished, the next work unrelated to \
+it): cheaper and cleaner than a compaction, which keeps a summary that every later request \
+carries. Without an id it is your own session; the orchestrator may name a member, never itself.",
+            object(
+                json!({
+                    "id": { "type": "string", "description": "The member to clear (orchestrator only); leave out for yourself" },
+                    "note": { "type": "string", "description": "What the fresh session should know first: why, and what to pick up" },
+                }),
+                &[],
+            ),
+            false,
+        ),
+        tool(
             "agent_inbox",
             "Read your messages in full. By default returns unread messages and marks them read; \
 with an id, that one message (one you sent or received), e.g. one a card or a teammate points to. \
@@ -410,6 +427,21 @@ it) is told to read it again; a failed task can be revised before task_retry.",
             "task_retry",
             "Put a failed or blocked task back in the queue.",
             object(json!({ "id": { "type": "string" } }), &["id"]),
+        ),
+        orchestrator(
+            "workflow_run",
+            "Lay this team's workflow on the board for one unit of work (a phase): one card per \
+step, named <step>-<phase>, assigned to the step's role and chained as the workflow says, each \
+carrying the brief. Only a team whose style declares a workflow has one; your briefing lists its \
+steps. Returns the cards.",
+            object(
+                json!({
+                    "phase": { "type": "string", "description": "Short id of the unit, as in 03-auth: lowercase letters, digits, - and _" },
+                    "title": { "type": "string", "description": "The unit's title, part of every card's title" },
+                    "brief": { "type": "string", "description": "What every step needs to know: the goal, the scope, what came before, where to look" },
+                }),
+                &["phase", "title"],
+            ),
         ),
         orchestrator(
             "integrate",
@@ -1079,6 +1111,23 @@ pub fn call(client: &mut Client, name: &str, args: &Value) -> Result<ToolOutput,
             )?;
             out(render_inbox(&inbox), raw)
         }
+        "agent_clear" => {
+            let (agent, raw): (Agent, _) = rpc(
+                client,
+                Call::AgentClear {
+                    id: opt_str(args, "id"),
+                    note: opt_str(args, "note"),
+                },
+            )?;
+            out(
+                format!(
+                    "A fresh start of {}'s session is queued: when its current turn ends, a new \
+session takes over with nothing of the conversation kept.",
+                    agent.id
+                ),
+                raw,
+            )
+        }
         "agent_compact" => {
             let keep = opt_str(args, "keep");
             let (agent, raw): (Agent, _) = rpc(
@@ -1490,6 +1539,35 @@ done and you have been told so."
                 },
             )?;
             out(format!("Task {} queued again.", task.id), raw)
+        }
+        "workflow_run" => {
+            let (tasks, raw): (Vec<Task>, _) = rpc(
+                client,
+                Call::WorkflowRun {
+                    phase: arg_str(args, "phase")?,
+                    title: arg_str(args, "title")?,
+                    brief: opt_str(args, "brief").unwrap_or_default(),
+                },
+            )?;
+            let chain: Vec<String> = tasks
+                .iter()
+                .map(|t| {
+                    format!(
+                        "{} [{}] {}",
+                        t.id,
+                        t.status,
+                        t.assigned_agent.as_deref().unwrap_or("-")
+                    )
+                })
+                .collect();
+            out(
+                format!(
+                    "{} cards laid out; the first starts when its owner is free:\n{}",
+                    tasks.len(),
+                    chain.join("\n")
+                ),
+                raw,
+            )
         }
         "integrate" => {
             let (result, raw): (Value, _) = rpc(client, Call::Integrate)?;

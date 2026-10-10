@@ -31,6 +31,7 @@ const END_TURN_TOOLS: &[&str] = &[
     "agent_send",
     "agent_broadcast",
     "agent_status",
+    "agent_clear",
     "task_complete",
     "task_fail",
     "review_submit",
@@ -99,10 +100,14 @@ check before calling {name} again"
     }
 }
 
-fn tool_list(orchestrator: bool, ends_turns: bool) -> Value {
+/// The tools offered: the orchestrator's or a member's, cut down to
+/// `allowed` when the team's style takes some away (the identity file
+/// carries the list, so it is the same whether or not the daemon answers).
+fn tool_list(orchestrator: bool, ends_turns: bool, allowed: Option<&[String]>) -> Value {
     let tools: Vec<Value> = tools::definitions()
         .into_iter()
         .filter(|t| orchestrator || !t.orchestrator_only)
+        .filter(|t| allowed.is_none_or(|allowed| allowed.iter().any(|a| a == t.name)))
         .map(|t| {
             let mut schema = t.schema;
             if ends_turns && END_TURN_TOOLS.contains(&t.name) {
@@ -156,14 +161,32 @@ fn handle(bridge: &mut Bridge, message: &Value) -> Option<Value> {
             }))
         }
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(tool_list(bridge.is_orchestrator(), bridge.ends_turns)),
+        "tools/list" => Ok(tool_list(
+            bridge.is_orchestrator(),
+            bridge.ends_turns,
+            bridge.identity.tools.as_deref(),
+        )),
         "tools/call" => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
             let args = params
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            Ok(match bridge.call_tool(name, &args) {
+            // A tool the style took away is refused here as well as by the
+            // daemon: the model is told plainly, not by a failed call.
+            let withheld = bridge
+                .identity
+                .tools
+                .as_ref()
+                .is_some_and(|allowed| !allowed.iter().any(|a| a == name));
+            let called = if withheld {
+                Err(format!(
+                    "{name} is not among the crew tools this team's style gives you"
+                ))
+            } else {
+                bridge.call_tool(name, &args)
+            };
+            Ok(match called {
                 Ok(text) if bridge.ends_turns && ends_turn(name, &args) => json!({
                     "content": [{ "type": "text", "text": text }],
                     "isError": false,
@@ -245,6 +268,7 @@ mod tests {
                 agent_id: "claude-1".into(),
                 token: "t".into(),
                 orchestrator: false,
+                tools: None,
             },
             client: None,
             ends_turns: false,
@@ -310,6 +334,45 @@ mod tests {
             .unwrap()
             .iter()
             .any(|t| t["name"] == "task_create"));
+    }
+
+    #[test]
+    fn a_member_whose_style_cut_its_crew_tools_sees_and_calls_those_only() {
+        let mut b = bridge();
+        b.identity.tools = Some(
+            ["agents_list", "task_get", "task_complete", "agent_send"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+        );
+        let r = handle(
+            &mut b,
+            &json!({"jsonrpc":"2.0","id":8,"method":"tools/list"}),
+        )
+        .unwrap();
+        let names: Vec<&str> = r["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            ["agents_list", "agent_send", "task_get", "task_complete"]
+        );
+        // Called anyway, a withheld tool is answered, not forwarded.
+        let r = handle(
+            &mut b,
+            &json!({"jsonrpc":"2.0","id":9,"method":"tools/call",
+                "params":{"name":"git_merge","arguments":{"from_agent":"x"}}}),
+        )
+        .unwrap();
+        assert_eq!(r["result"]["isError"], true);
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("git_merge is not among the crew tools this team's style gives you"),
+            "{text}"
+        );
     }
 
     // T21 (notes/toolboxes.md): the role comes from the launch identity, so
@@ -380,6 +443,7 @@ mod tests {
                 agent_id: "claude-1".into(),
                 token: "t".into(),
                 orchestrator: false,
+                tools: None,
             },
             client: None,
             ends_turns: false,
@@ -597,6 +661,7 @@ mod tests {
                 agent_id: "claude-1".into(),
                 token: "t".into(),
                 orchestrator: false,
+                tools: None,
             },
             client: None,
             ends_turns: false,

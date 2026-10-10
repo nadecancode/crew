@@ -1,6 +1,7 @@
 //! Launching an agent (old sandboxes retired, home seeded, sidecar, process) and stopping it.
 
 use anyhow::{anyhow, Result};
+use crew_core::guardrails::ToolClass;
 use crew_core::paths::{write_private_file, Identity};
 use crew_core::util::now_ms;
 use crew_core::{AgentStatus, RuntimeKind};
@@ -123,7 +124,7 @@ impl Daemon {
                 .get(id)
                 .is_some_and(|l| l.session_confirmed));
         self.fall_back_by_style(id, None, Some(fresh)).await;
-        let (mut agent, mut local, team, agents, tasks, token, worktrees) = {
+        let (mut agent, mut local, team, agents, tasks, token, worktrees, cut_tools, cut_crew) = {
             let model = self.model();
             let agent = model
                 .agent(id)
@@ -134,6 +135,26 @@ impl Daemon {
                 .team
                 .clone()
                 .ok_or_else(|| anyhow!("no team is loaded"))?;
+            // The style's cuts, by member, for the briefing's roster and
+            // the member's own sections.
+            let mut cut_tools: Vec<(String, Vec<ToolClass>)> = Vec::new();
+            let mut cut_crew: Vec<(String, Vec<String>)> = Vec::new();
+            for member in &model.agents {
+                let Some(local) = model.local.get(&member.id) else {
+                    continue;
+                };
+                if let Some(classes) = &local.spec.tools {
+                    cut_tools.push((member.id.clone(), classes.clone()));
+                }
+                let selection = if member.orchestrator {
+                    team.orchestrator.crew_tools.clone()
+                } else {
+                    local.spec.crew_tools.clone()
+                };
+                if let Some(selection) = selection {
+                    cut_crew.push((member.id.clone(), selection));
+                }
+            }
             (
                 agent,
                 model.local.get(id).cloned().unwrap_or_default(),
@@ -142,6 +163,8 @@ impl Daemon {
                 model.tasks.clone(),
                 model.tokens.get(id).cloned().unwrap_or_default(),
                 model.session.isolation == "worktree",
+                cut_tools,
+                cut_crew,
             )
         };
         if start == Start::Fresh {
@@ -174,6 +197,7 @@ impl Daemon {
             agent_id: id.to_string(),
             token,
             orchestrator: agent.orchestrator,
+            tools: self.tool_names_of(id, agent.orchestrator),
         };
         write_private_file(&identity_path, &serde_json::to_vec_pretty(&identity)?)?;
 
@@ -200,6 +224,12 @@ impl Daemon {
             worktrees,
             vcs: self.vcs().kind(),
             voice: team.defaults.voice,
+            rules: prompt::Rules {
+                messaging: team.guardrails.messaging,
+                workflow: team.workflow.as_ref(),
+                tools: &cut_tools,
+                crew_tools: &cut_crew,
+            },
         };
         let briefing = if agent.orchestrator {
             prompt::orchestrator_briefing(&view)
@@ -483,6 +513,9 @@ impl Daemon {
         } else if let Some(handoff) = local.handoff.as_deref().filter(|_| !scripted) {
             // A fresh session on another CLI picks up from the old one.
             body.push_str(handoff);
+        } else if let Some(notice) = notice.as_deref().filter(|_| !scripted) {
+            // A session started afresh on purpose (a clear) is told so.
+            body.push_str(notice);
         }
         if !pending.is_empty() {
             if !body.is_empty() {

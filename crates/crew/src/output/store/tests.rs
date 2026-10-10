@@ -59,6 +59,7 @@ fn public_reference_never_selects_another_credential_scope_or_path() {
         agent_id: "a".into(),
         token: "old".into(),
         orchestrator: false,
+        tools: None,
     };
     let old = namespace(&identity);
     identity.token = "new".into();

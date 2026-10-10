@@ -33,6 +33,7 @@ pub(crate) use delivery::native_hook;
 mod fallback;
 pub mod features;
 mod gitops;
+mod guardrails;
 mod handlers;
 mod keepalive;
 mod limits;
@@ -243,6 +244,12 @@ pub(crate) struct AgentRuntimeState {
     pub compact_keep: Option<String>,
     /// When the session was last asked to compact (0: not yet).
     pub compact_sent_at: i64,
+    /// A clear is queued (context.rs): when the turn ends, the session is
+    /// replaced by a fresh one, which reads `clear_note` first.
+    pub clear_pending: bool,
+    pub clear_note: Option<String>,
+    /// Who asked for the clear (an agent id, the operator, or crew).
+    pub clear_by: Option<String>,
     pub compacted_at: i64,
     /// Where the Codex session file ended when a compaction was asked for.
     pub compact_offset: u64,

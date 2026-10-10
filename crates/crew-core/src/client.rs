@@ -892,6 +892,7 @@ mod tests {
                 agent_id: "worker".into(),
                 token: "identity-secret-do-not-print".into(),
                 orchestrator: false,
+                tools: None,
             })
             .unwrap(),
         )
@@ -1392,6 +1393,7 @@ mod tests {
                             agent_id: "worker".into(),
                             token: "test".into(),
                             orchestrator: false,
+                            tools: None,
                         },
                         "test",
                     )

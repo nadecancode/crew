@@ -256,6 +256,17 @@ family. A final task integrates the branches, runs the baseline again and
 writes `review/SUMMARY.md`. An objective that asks only for a review gets the
 findings and the summary, and no code is changed.
 
+The built-in `gsd` style follows [GSD](https://github.com/open-gsd/gsd-core):
+work moves one phase at a time through a fixed loop, research → plan →
+execute → verify, with one role per step and everything the team knows
+written down under `.planning/` so that every card can be done from a fresh
+context. The roster is fixed (researcher, planner, checker, executor,
+verifier), each role gets only the tools its step needs, members report to
+the orchestrator and never to one another, the orchestrator puts work on
+the board through the workflow alone, and every card starts in a fresh
+session (`context: fresh`, see [Context windows](#context-windows)). All of
+that is enforced, not only asked for: see [Guardrails](#guardrails).
+
 ```
  crew · new team                                                       /work/payments
 ┌ work style ────────────┐┌ research ────────────────────────────────────────────────┐
@@ -310,7 +321,7 @@ name:
 
 | origin   | folder                              |
 |----------|-------------------------------------|
-| built-in | `default`, `research`, `experiment`, `cleanup` |
+| built-in | `default`, `research`, `experiment`, `cleanup`, `gsd` |
 | global   | `/etc/crew/styles/`                 |
 | user     | `~/.config/crew/styles/`            |
 | project  | `<workspace>/.crew/styles/`         |
@@ -329,6 +340,85 @@ offered again in the launcher. The style file itself is read fresh at every
 launch, so an edit applies to the next team. To switch, `crew stop` the
 running team and run `crew` again. The dashboard header and `crew status`
 show which style a team runs in.
+
+### Guardrails
+
+Instructions ask; guardrails hold. A style (or a team file) can fix how its
+members act, and crew enforces it in the daemon and at launch, whatever a
+session later asks for. The briefing says what the limits are, so nobody
+tries what it cannot do.
+
+```yaml
+guardrails:
+  messaging: hub            # open (default) | hub
+orchestrator:
+  crew_tools: [messaging, workflow, task_edit, task_retry]
+agents:
+  - id: researcher
+    role: reads the code and writes RESEARCH.md
+    tools: [read, web]      # of its runtime's own tools; omit for all
+    crew_tools: [messaging, git]   # of crew's tools; omit for all
+workflow:                   # the chain of cards one unit of work goes through
+  steps:
+    - id: research
+      agent: researcher
+      produces: [".planning/phases/{phase}/RESEARCH.md"]
+      description: |
+        Research phase {phase} ({title}). {brief}
+    - id: plan
+      agent: planner
+      reviewer: checker
+      depends_on: [research]
+      description: …
+```
+
+**Messaging.** `hub` makes the team hub-and-spoke: a member writes to the
+orchestrator only (to the operator when there is no orchestrator agent; a
+subagent to its parent), the orchestrator to anyone, and nobody but the
+orchestrator broadcasts. A message sent elsewhere is refused with the reason;
+a line of a reply addressed to a teammate (`@name:`) is carried to the
+orchestrator instead, marked for whom it was, so nothing is lost. Reviews
+still work: the orchestrator sets a card's `reviewer`, and crew sends the
+request. `open`, the default, is how teams work otherwise.
+
+**Tools.** `tools` names the classes of its runtime's own tools a member
+keeps: `read` (files, search), `write`, `shell`, `web`, `agents` (the
+runtime's in-session subagents). crew starts the session without the rest:
+
+| class | Claude Code | Codex | pi |
+|-------|-------------|-------|----|
+| `write` off | `--tools` without Write, Edit, MultiEdit, NotebookEdit | the sandbox is `read-only`, whatever the permission policy (its shell cannot write either) | `--exclude-tools edit,write` |
+| `shell` off | without Bash and its helpers | cannot be taken away: it is how Codex reads files; the member is told what it is for | `--exclude-tools bash` |
+| `web` off | without WebFetch, WebSearch | `web_search = "disabled"` | nothing to take |
+| `agents` off | without Agent | cannot be taken away; the member is told | nothing to take |
+| `read` off | without Read, Glob, Grep | cannot be taken away | `--exclude-tools read,grep,find,ls` |
+
+What a runtime cannot take away is named in the member's briefing with
+what it is for. Where the shell stays, a write restriction holds only as far
+as the sandbox does (Codex) or the model's compliance (Claude Code with
+Bash): say `tools: [read]` for a reader that must not write.
+
+**Crew tools.** `crew_tools` lists what a member gets of crew's own tools,
+by group or by name: `messaging` (agent_send, agent_broadcast), `git`,
+`review` (review_request, review_submit), `spawn` (agent_spawn), and for the
+orchestrator `staff` (agent_add, agent_remove, agent_set_model), `board`
+(task_create, task_edit, task_assign, task_retry) and `workflow`
+(workflow_run). Reading the board, one's own card and inbox, status and
+progress, finishing or giving up a card, declining, compacting, and the
+orchestrator's operator_ask and session_complete are never taken away. The
+member's MCP server offers what it has and no other tool, and the daemon
+refuses the rest however it is asked (`crew ctl` included). A subagent gets
+its parent's cuts.
+
+**Workflow.** `workflow.steps` fixes the chain of cards one unit of work (a
+phase) goes through: each step a card for one role, with an optional
+reviewer and the steps it waits for. The orchestrator lays a unit on the
+board with `workflow_run(phase, title, brief)`: one card per step, named
+`<step>-<phase>`, chained as declared, with `{phase}`, `{title}` and
+`{brief}` filled into the templates. With `task_create` left out of the
+orchestrator's `crew_tools`, that is the only way work gets on the board. A
+run is all or none: an id already on the board stops it before any card is
+made.
 
 ## Model catalog
 
@@ -577,7 +667,9 @@ The orchestrator keeps each runtime's own guidance, since you read it.
 | `review_request` / `review_submit` | reviews between agents |
 | `agent_spawn(task, role?)` | launch a subagent |
 | `agent_compact(keep?)` | compact your own context when the turn ends; the orchestrator may name a member (`id`) — see [Context windows](#context-windows) |
+| `agent_clear(note?)` | start your context afresh when the turn ends: a new session, nothing kept, your open card handed to it again; the orchestrator may name a member (`id`), never itself — see [Context windows](#context-windows) |
 | `agent_add` / `agent_remove` / `task_create` / `task_edit` / `task_assign` / `task_retry` / `integrate` | orchestrator only |
+| `workflow_run(phase, title, brief)` | orchestrator only, in a team whose style declares a `workflow`: lay its chain of cards on the board for one unit of work (see [Guardrails](#guardrails)) |
 | `agent_set_model(id, model, note?)` | orchestrator only: put a member on another model its CLI runs; its session is restarted there, resumed, and reads the note first (see [Usage limits](#usage-limits)). The orchestrator's own model, and moving anyone to another CLI, are refused: they are [the operator's](#changing-model-and-cli) |
 | `session_complete(summary, decisions?)` | orchestrator only: the final report; each of `decisions` is put to you as a question (see [Questions for you](#questions-for-you)) |
 | `operator_ask(question, options?, asked_by?)` | orchestrator only: put a question to you (see [Questions for you](#questions-for-you)) |
@@ -1311,20 +1403,32 @@ defaults:
     fable: [opus]             # (the built-in styles say this; any catalog model, of either CLI)
   refusal_fallbacks: []       # what takes over a turn a model refuses: catalog models, or pi models (see "Refusal fallbacks")
   voice: ultracave            # how members write to one another: ultracave | megacave | caveman | plain (see "How agents write")
+  context: keep               # keep (compact a full window) | fresh (each card starts in a new session; see "Context windows")
   max_restarts: 1             # restarts after a crash (resuming the session)
   command: []                 # default command for `shell` agents
+guardrails:
+  messaging: open             # open | hub (members write to the orchestrator only; see Guardrails)
+workflow:                     # optional: the chain of cards one unit of work goes through
+  steps:                      # (workflow_run lays it on the board; see Guardrails)
+    - id: research
+      agent: researcher       # a roster member; reviewer?, depends_on? (step ids), title?
+      produces: [".planning/phases/{phase}/RESEARCH.md"]
+      description: "Research {phase} ({title}). {brief}"
 orchestrator:
   agent: true                 # false: the scheduler alone orchestrates
   runtime: claude
   model: sonnet
   notify_p2p: false
+  crew_tools: [messaging, board, staff, workflow]   # of crew's tools; omit for all (see Guardrails)
 agents:                       # 0–10; omit to let the orchestrator decide
   - id: claude-1              # [a-z][a-z0-9_-]{0,31}
     role: billing
     model: gpt-6.1-sol        # a catalog model also decides the runtime
     runtime: codex            # per-agent overrides: runtime, model, permissions,
     task: "shorthand: a task for this agent"   # permission_mode, allowed_tools,
-tasks:                                         # extra_args, command
+    tools: [read, write, shell, web, agents]   # extra_args, command
+    crew_tools: [messaging, git, review, spawn]  # (tools, crew_tools: see Guardrails)
+tasks:
   - id: ledger
     title: Implement the ledger
     description: …
@@ -1793,6 +1897,22 @@ crew lets the orchestrator do it deliberately instead:
   carries on. Its briefing is in its system prompt, which a compaction keeps,
   so it is not sent again. A compaction the runtime did on its own is noticed
   the same way, and the orchestrator hears of it.
+- **Clearing.** Sometimes nothing of a member's conversation matters any
+  more: its card is done and the next is unrelated, or it has no card at
+  all. Then a summary is not worth keeping, let alone carrying with every
+  later request. `agent_clear(id, note)` starts the member's context afresh:
+  when its current turn ends, its session is replaced by a new one of the
+  same runtime and model with nothing kept; the briefing is in place as at
+  any launch, an open card is handed to it again (`task_get` reads it, with
+  the results and commits it builds on), and the note is the first thing it
+  reads. A member may clear its own. crew clears by itself a member with no
+  open card whose window passes the warning threshold, and tells the
+  orchestrator. The orchestrator's own window is compacted, never cleared:
+  it holds the plan. With `defaults.context: fresh` (or `context: fresh` on
+  a member) every card starts in a fresh session: the session is cleared
+  when a card is finished, so what the next card needs must be on the board
+  (results, commits) rather than in the conversation. The built-in `gsd`
+  style works this way.
 
 **The 1M-token window.** Models that have one (`long_context = true` in the
 [model catalog](#model-catalog): Fable, Opus and Sonnet; GPT-6 Astra, GPT-6.1

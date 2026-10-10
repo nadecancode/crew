@@ -550,10 +550,13 @@ impl Daemon {
         if self.is_orchestrator(id) {
             self.found_team_once_planned();
         }
-        // A compaction queued for this agent has its moment now.
+        // A compaction, or a clear, queued for this agent has its moment now.
         let daemon = self.clone();
         let agent = id.to_string();
-        tokio::spawn(async move { daemon.try_compact(&agent).await });
+        tokio::spawn(async move {
+            daemon.try_clear(&agent).await;
+            daemon.try_compact(&agent).await;
+        });
         // Did the turn do what it was asked, or did the model refuse?
         let daemon = self.clone();
         let agent = id.to_string();

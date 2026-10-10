@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::guardrails::{self, Guardrails, ToolClass, Workflow};
 use crate::toolbox::{self, Toolbox};
 use crate::types::{RuntimeKind, MAX_MESSAGE_BYTES, ORCHESTRATOR_ID};
 use crate::util::is_valid_id;
@@ -60,6 +61,13 @@ pub struct Style {
     /// Toolbox bundles, by name (see [`crate::toolbox`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub toolboxes: BTreeMap<String, Toolbox>,
+    /// What is enforced about how members act (see [`crate::guardrails`]).
+    #[serde(default, skip_serializing_if = "Guardrails::is_default")]
+    pub guardrails: Guardrails,
+    /// The chain of cards one unit of work goes through (see
+    /// [`crate::guardrails`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<Workflow>,
     #[serde(default)]
     pub defaults: AgentDefaults,
     #[serde(default)]
@@ -126,6 +134,8 @@ impl Style {
             backend: self.backend,
             herdr: self.herdr.clone(),
             toolboxes: self.toolboxes.clone(),
+            guardrails: self.guardrails.clone(),
+            workflow: self.workflow.clone(),
             defaults: self.defaults.clone(),
             orchestrator: self.orchestrator.clone(),
             agents: self.agents.clone(),
@@ -158,6 +168,13 @@ pub struct TeamConfig {
     /// Toolbox bundles, by name (see [`crate::toolbox`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub toolboxes: BTreeMap<String, Toolbox>,
+    /// What is enforced about how members act (see [`crate::guardrails`]).
+    #[serde(default, skip_serializing_if = "Guardrails::is_default")]
+    pub guardrails: Guardrails,
+    /// The chain of cards one unit of work goes through (see
+    /// [`crate::guardrails`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<Workflow>,
     #[serde(default)]
     pub defaults: AgentDefaults,
     #[serde(default)]
@@ -411,6 +428,32 @@ pub struct AgentDefaults {
     /// What every member's toolbox starts from (see [`crate::toolbox`]).
     #[serde(default, skip_serializing_if = "Toolbox::is_empty")]
     pub toolbox: Toolbox,
+    /// What becomes of a member's conversation between cards: kept (and
+    /// compacted when full), or cleared, each card starting in a fresh
+    /// session.
+    #[serde(default, skip_serializing_if = "ContextPolicy::is_default")]
+    pub context: ContextPolicy,
+}
+
+/// What becomes of a member's conversation between cards.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextPolicy {
+    /// The session carries on from card to card; a full window is
+    /// compacted (`agent_compact`), or cleared when nothing is open.
+    #[default]
+    Keep,
+    /// Each card starts in a fresh session: when a card is finished, the
+    /// session is replaced by a new one with nothing of it kept. What the
+    /// next card needs is on the board (results, commits), not in the
+    /// conversation.
+    Fresh,
+}
+
+impl ContextPolicy {
+    pub fn is_default(&self) -> bool {
+        *self == ContextPolicy::default()
+    }
 }
 
 /// Whether agents run with their runtime's permission checks.
@@ -499,6 +542,7 @@ impl Default for AgentDefaults {
             refusal_fallbacks: Vec::new(),
             voice: Voice::default(),
             toolbox: Toolbox::default(),
+            context: ContextPolicy::default(),
         }
     }
 }
@@ -523,6 +567,10 @@ pub struct OrchestratorConfig {
     /// The orchestrator's own toolbox level (see [`crate::toolbox`]).
     #[serde(default, skip_serializing_if = "Toolbox::is_empty")]
     pub toolbox: Toolbox,
+    /// The crew tools the orchestrator gets, by group or name (see
+    /// [`crate::guardrails`]); left out, all of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crew_tools: Option<Vec<String>>,
 }
 
 fn default_true() -> bool {
@@ -538,6 +586,7 @@ impl Default for OrchestratorConfig {
             command: Vec::new(),
             notify_p2p: false,
             toolbox: Toolbox::default(),
+            crew_tools: None,
         }
     }
 }
@@ -573,6 +622,17 @@ pub struct AgentSpec {
     /// This member's toolbox level (see [`crate::toolbox`]).
     #[serde(default, skip_serializing_if = "Toolbox::is_empty")]
     pub toolbox: Toolbox,
+    /// The classes of its runtime's own tools this member gets (see
+    /// [`crate::guardrails`]); left out, all of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<ToolClass>>,
+    /// The crew tools this member gets, by group or name (see
+    /// [`crate::guardrails`]); left out, all of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crew_tools: Option<Vec<String>>,
+    /// Override the team's `defaults.context` for this member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<ContextPolicy>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -901,6 +961,13 @@ impl TeamConfig {
         {
             bail!("the orchestrator uses the shell runtime and needs `command`");
         }
+        if let Some(selection) = &self.orchestrator.crew_tools {
+            guardrails::crew_tools_allowed(selection)
+                .map_err(|e| anyhow!("orchestrator.crew_tools: {e}"))?;
+        }
+        if let Some(workflow) = &self.workflow {
+            workflow.validate(&self.agents)?;
+        }
         validate_model_fallbacks(&self.defaults.model_fallbacks)?;
         validate_refusal_fallbacks(&self.defaults.refusal_fallbacks)?;
         for (key, model) in [
@@ -1083,6 +1150,18 @@ pub fn validate_agent_spec(agent: &AgentSpec) -> Result<()> {
         .is_some_and(|model| !model_name(model))
     {
         bail!("agent '{}'.model is not a model name", agent.id);
+    }
+    if let Some(selection) = &agent.crew_tools {
+        guardrails::crew_tools_allowed(selection)
+            .map_err(|e| anyhow!("agent '{}'.crew_tools: {e}", agent.id))?;
+    }
+    if let Some(tools) = &agent.tools {
+        let mut seen = HashSet::new();
+        for class in tools {
+            if !seen.insert(class) {
+                bail!("agent '{}'.tools names {} twice", agent.id, class.as_str());
+            }
+        }
     }
     // What can be checked without the team: the body's own fields. Includes
     // and exclusions need the team's bundles (see

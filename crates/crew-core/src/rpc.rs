@@ -147,6 +147,17 @@ pub enum Call {
         #[serde(default)]
         keep: Option<String>,
     },
+    /// Start a member's context afresh: when its current turn ends, its
+    /// session is replaced by a new one with nothing of the conversation
+    /// kept; `note` is the first thing the new session reads. A member may
+    /// ask for its own (`id` omitted); the orchestrator and the operator for
+    /// a member's. The orchestrator's own is compacted, never cleared.
+    AgentClear {
+        #[serde(default)]
+        id: Option<String>,
+        #[serde(default)]
+        note: Option<String>,
+    },
     /// Rendered terminal contents of an agent: its last `lines` lines, or
     /// with `screen` only what the terminal shows now. The screen is quick
     /// to read on every backend; scrollback is not (herdr walks it slowly).
@@ -347,6 +358,14 @@ pub enum Call {
         reason: String,
     },
     /// Put a failed or blocked task back in the queue.
+    /// Orchestrator only: lay the team's workflow on the board for one unit
+    /// of work (crew_core::guardrails::Workflow::cards).
+    WorkflowRun {
+        phase: String,
+        title: String,
+        #[serde(default)]
+        brief: String,
+    },
     TaskRetry {
         id: String,
     },
@@ -576,6 +595,7 @@ impl Call {
             Call::AgentPause { .. } => "agent_pause",
             Call::AgentResume { .. } => "agent_resume",
             Call::AgentCompact { .. } => "agent_compact",
+            Call::AgentClear { .. } => "agent_clear",
             Call::Resume { .. } => "resume",
             Call::AgentOutput { .. } => "agent_output",
             Call::AgentTranscript { .. } => "agent_transcript",
@@ -607,6 +627,7 @@ impl Call {
             Call::TaskComplete { .. } => "task_complete",
             Call::TaskFail { .. } => "task_fail",
             Call::TaskRetry { .. } => "task_retry",
+            Call::WorkflowRun { .. } => "workflow_run",
             Call::ReviewRequest { .. } => "review_request",
             Call::ReviewSubmit { .. } => "review_submit",
             Call::SessionComplete { .. } => "session_complete",

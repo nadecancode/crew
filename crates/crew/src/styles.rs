@@ -7,7 +7,7 @@
 //!
 //! | origin   | folder                                              |
 //! |----------|-----------------------------------------------------|
-//! | built-in | compiled in (`default`, `research`, `experiment`, `cleanup`) |
+//! | built-in | compiled in (`default`, `research`, `experiment`, `cleanup`, `gsd`) |
 //! | global   | `/etc/crew/styles/`                                 |
 //! | user     | `$XDG_CONFIG_HOME/crew/styles/` (`~/.config/crew/…`) |
 //! | project  | `<workspace>/.crew/styles/`                         |
@@ -24,11 +24,12 @@ use crate::endpoints::Scope;
 /// The style used when none is chosen.
 pub const DEFAULT_STYLE: &str = "default";
 
-const BUILT_IN: [(&str, &str); 4] = [
+const BUILT_IN: [(&str, &str); 5] = [
     (DEFAULT_STYLE, include_str!("../styles/default.yaml")),
     ("research", include_str!("../styles/research.yaml")),
     ("experiment", include_str!("../styles/experiment.yaml")),
     ("cleanup", include_str!("../styles/cleanup.yaml")),
+    ("gsd", include_str!("../styles/gsd.yaml")),
 ];
 
 /// What `crew style new` writes when it is not copying an existing style.
@@ -279,8 +280,9 @@ mod tests {
         for (name, text) in BUILT_IN {
             let style = Style::parse(name, text, false).unwrap();
             assert!(!style.description.is_empty(), "{name}");
+            // GSD fixes its roster: one role per step of its loop.
             assert!(
-                style.agents.is_empty() && style.orchestrator.agent,
+                (style.agents.is_empty() || name == "gsd") && style.orchestrator.agent,
                 "{name}"
             );
             styles.put(Entry {
@@ -294,7 +296,48 @@ mod tests {
             .iter()
             .map(|e| e.style.name.as_str())
             .collect();
-        assert_eq!(names, ["default", "research", "experiment", "cleanup"]);
+        assert_eq!(
+            names,
+            ["default", "research", "experiment", "cleanup", "gsd"]
+        );
+        let gsd = styles.get("gsd").unwrap();
+        assert_eq!(
+            gsd.staffing(),
+            "researcher, planner, checker, executor, verifier + orchestrator"
+        );
+        let gsd = &gsd.style;
+        assert_eq!(
+            gsd.guardrails.messaging,
+            crew_core::guardrails::Messaging::Hub
+        );
+        let steps: Vec<&str> = gsd
+            .workflow
+            .as_ref()
+            .unwrap()
+            .steps
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(steps, ["research", "plan", "execute", "verify"]);
+        // The orchestrator plans through the workflow alone; each role is
+        // confined to its step's tools.
+        let orchestrator = gsd.orchestrator.crew_tools.as_deref().unwrap();
+        assert!(orchestrator.contains(&"workflow".to_string()));
+        assert!(!crew_core::guardrails::crew_tool_allowed(
+            Some(orchestrator),
+            "task_create"
+        ));
+        let researcher = gsd.agents.iter().find(|a| a.id == "researcher").unwrap();
+        assert_eq!(
+            researcher.tools.as_deref(),
+            Some(
+                &[
+                    crew_core::guardrails::ToolClass::Read,
+                    crew_core::guardrails::ToolClass::Web
+                ][..]
+            )
+        );
+        assert!(gsd.tasks.iter().any(|t| t.id == "roadmap"));
         let research = styles.get("research").unwrap();
         assert_eq!(research.staffing(), "staffed by the orchestrator");
         assert_eq!(research.runtime(), "claude");
@@ -316,7 +359,7 @@ mod tests {
         assert!(research.source().unwrap().contains("description:"));
         let error = styles.require("reserch").unwrap_err().to_string();
         assert!(
-            error.contains("available: default, research, experiment, cleanup"),
+            error.contains("available: default, research, experiment, cleanup, gsd"),
             "{error}"
         );
         // The template `crew style new` writes is itself a valid style.

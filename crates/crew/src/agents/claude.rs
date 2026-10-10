@@ -11,6 +11,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::Result;
+use crew_core::guardrails::ToolClass;
 use crew_core::paths::{write_private_file, IDENTITY_ENV};
 use crew_core::util::{one_line, truncate_chars};
 use crew_core::{RuntimeKind, Usage};
@@ -94,6 +95,45 @@ const LONG_CONTEXT_TAG: &str = "[1m]";
 /// Set, Claude Code never substitutes another model for the session's (when
 /// its usage window is used up, or it is overloaded); the turn fails instead.
 const NO_FALLBACK_ENV: &str = "CLAUDE_CODE_NO_MODEL_FALLBACK";
+
+/// Claude Code's built-in tools, by class (Claude Code 2.1.295). Whatever
+/// the classes, a member keeps its skills, its task list and the tool
+/// search; it never gets the ask-the-user dialog (nobody watches its
+/// terminal) or the plan-mode switches.
+const CLAUDE_TOOLS_ALWAYS: &[&str] = &["Skill", "TodoWrite", "ToolSearch"];
+const CLAUDE_TOOLS: &[(ToolClass, &[&str])] = &[
+    (
+        ToolClass::Read,
+        &[
+            "Read",
+            "Glob",
+            "Grep",
+            "ListMcpResourcesTool",
+            "ReadMcpResourceTool",
+        ],
+    ),
+    (
+        ToolClass::Write,
+        &["Write", "Edit", "MultiEdit", "NotebookEdit"],
+    ),
+    (
+        ToolClass::Shell,
+        &["Bash", "BashOutput", "KillShell", "TaskOutput", "TaskStop"],
+    ),
+    (ToolClass::Web, &["WebFetch", "WebSearch"]),
+    (ToolClass::Agents, &["Agent", "SendMessage", "ListAgents"]),
+];
+
+/// The `--tools` list for a member that gets `classes` of the built-ins.
+pub(crate) fn claude_tools(classes: &[ToolClass]) -> Vec<&'static str> {
+    let mut tools: Vec<&'static str> = CLAUDE_TOOLS_ALWAYS.to_vec();
+    for (class, names) in CLAUDE_TOOLS {
+        if classes.contains(class) {
+            tools.extend(names.iter().copied());
+        }
+    }
+    tools
+}
 /// Where Claude Code keeps its configuration, credentials, sessions and
 /// transcripts (and `.claude.json`, which moves with it).
 pub const CONFIG_DIR_ENV: &str = "CLAUDE_CONFIG_DIR";
@@ -293,6 +333,12 @@ impl AgentRuntime for ClaudeRuntime {
         allowed.extend(ctx.settings.allowed_tools.iter().cloned());
         args.push("--allowedTools".into());
         args.push(allowed.join(","));
+        // The style's cut of the built-in tools (MCP tools are not among
+        // them, so the crew tools and the toolbox stay).
+        if let Some(classes) = &ctx.settings.tools {
+            args.push("--tools".into());
+            args.push(claude_tools(classes).join(","));
+        }
         // The endpoint decides which models exist.
         if let Some(model) = ctx.endpoint.model.as_ref().or(ctx.agent.model.as_ref()) {
             args.push("--model".into());
@@ -767,6 +813,49 @@ mod tests {
         assert_eq!(config_dir, home.join("claude").to_str());
         // Not sandboxed, Claude Code keeps using the operator's own.
         assert!(!launch(None).env.iter().any(|(k, _)| k == CONFIG_DIR_ENV));
+    }
+
+    #[test]
+    fn the_styles_cut_of_the_built_in_tools_is_the_tools_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = agent(dir.path());
+        let identity = dir.path().join("identity.json");
+        let launch = |tools: Option<Vec<ToolClass>>| {
+            let settings = AgentSettings {
+                tools,
+                ..AgentSettings::default()
+            };
+            ClaudeRuntime
+                .launch(&LaunchContext {
+                    agent: &agent,
+                    settings: &settings,
+                    crew_bin: Path::new("/opt/crew"),
+                    agent_dir: dir.path(),
+                    identity_path: &identity,
+                    briefing: "be helpful",
+                    resume: false,
+                    endpoint: &Endpoint::default(),
+                    long_context: false,
+                    private_home: None,
+                })
+                .unwrap()
+                .args
+        };
+        // Left alone, the built-ins are not mentioned.
+        assert!(!launch(None).contains(&"--tools".to_string()));
+        let args = launch(Some(vec![ToolClass::Read, ToolClass::Web]));
+        let at = args.iter().position(|a| a == "--tools").unwrap();
+        assert_eq!(
+            args[at + 1],
+            "Skill,TodoWrite,ToolSearch,Read,Glob,Grep,ListMcpResourcesTool,ReadMcpResourceTool,\
+WebFetch,WebSearch"
+        );
+        // The crew tools are MCP tools, outside the built-in set: still allowed.
+        assert!(args.iter().any(|a| a.starts_with("mcp__crew")));
+        // Nothing of the runtime's own: skills and the task list remain.
+        assert_eq!(claude_tools(&[]), ["Skill", "TodoWrite", "ToolSearch"]);
+        assert!(claude_tools(&ToolClass::ALL).contains(&"Agent"));
+        assert!(!claude_tools(&[ToolClass::Shell]).contains(&"Edit"));
     }
 
     #[test]

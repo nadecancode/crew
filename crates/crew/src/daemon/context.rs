@@ -9,6 +9,9 @@
 //! it is done the agent is told where it stands, so it picks its work up
 //! again instead of waiting for a prompt.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use crew_core::rpc::{Push, RpcError, ServerFrame, TranscriptResult};
 use crew_core::types::ContextUsage;
 use crew_core::util::{now_ms, one_line, truncate_chars};
@@ -160,6 +163,36 @@ impl Daemon {
             .warn()
             .data(json!({ "percent": percent, "tokens": tokens, "window": window })),
         );
+        // A member with nothing open has nothing worth a summary: its
+        // session is started afresh, and the orchestrator hears of it.
+        if !agent.orchestrator {
+            let idle = {
+                let model = self.model();
+                crate::tasks::active_task(&model.tasks, &agent.id).is_none()
+                    && !model.tasks.iter().any(|t| {
+                        t.assigned_agent.as_deref() == Some(&agent.id)
+                            && t.status == TaskStatus::Waiting
+                    })
+            };
+            if idle {
+                self.queue_clear(
+                    &agent.id,
+                    "crew",
+                    Some(format!(
+                        "Its context window was {figures} with no card open: nothing was worth \
+keeping."
+                    )),
+                );
+                self.try_clear(&agent.id).await;
+                self.notify_orchestrator(&format!(
+                    "{}'s context window was {figures} with no open card: its session is started \
+afresh (nothing to keep), so its next card starts clean.",
+                    agent.id
+                ))
+                .await;
+                return;
+            }
+        }
         let note = if agent.orchestrator {
             format!(
                 "Your own context window is {figures}. At a quiet moment, compact it with \
@@ -171,8 +204,9 @@ full, at whatever point that is."
             format!(
                 "{id}'s context window is {figures}. At a natural break in its work (between \
 tasks, after a commit) queue a compaction with agent_compact(id: \"{id}\", keep: \"...\"), naming \
-what its summary must keep: the task, decisions made, files in play. Left alone, its runtime \
-compacts it when it is nearly full, at whatever point that is.",
+what its summary must keep: the task, decisions made, files in play. If what it did so far does \
+not matter to what comes next, agent_clear(id: \"{id}\") instead: a fresh session, nothing kept. \
+Left alone, its runtime compacts it when it is nearly full, at whatever point that is.",
                 id = agent.id
             )
         };
@@ -298,6 +332,196 @@ compacts a teammate's",
         }
         if let Err(e) = procs.submit_prompt(id, &command).await {
             tracing::warn!("asking {id} to compact failed: {e}");
+        }
+    }
+
+    /// Queue a clear of a member's context: when its current turn ends, its
+    /// session is replaced by a fresh one with nothing of the conversation
+    /// kept, and `note` is the first thing the new session reads. A member
+    /// may ask for its own; the orchestrator and the operator for a
+    /// member's. The orchestrator's own holds the plan: compacted, never
+    /// cleared.
+    pub(crate) async fn clear_agent(
+        &self,
+        who: &Who,
+        id: Option<String>,
+        note: Option<String>,
+    ) -> Result<Agent, RpcError> {
+        let target = match (who, id) {
+            (Who::Agent(me), None) => me.clone(),
+            (Who::Agent(me), Some(id)) if id == *me => id,
+            (Who::Agent(me), Some(id)) => {
+                if !self.model().agent(me).is_some_and(|a| a.orchestrator) {
+                    return Err(RpcError::forbidden(
+                        "you can clear your own context (leave the id out); only the orchestrator \
+clears a teammate's",
+                    ));
+                }
+                id
+            }
+            (Who::Operator, Some(id)) => id,
+            (Who::Operator, None) => return Err(RpcError::invalid("name the agent to clear")),
+        };
+        let agent = self
+            .agent(&target)
+            .ok_or_else(|| RpcError::not_found(format!("no agent '{target}'")))?;
+        if agent.orchestrator {
+            return Err(RpcError::invalid(
+                "the orchestrator's context holds the plan: compact it (agent_compact), never \
+clear it",
+            ));
+        }
+        if agent.status.is_terminal() {
+            return Err(RpcError::invalid(format!("{target} is not running")));
+        }
+        let note = note
+            .map(|n| truncate_chars(n.trim(), KEEP_CHARS))
+            .filter(|n| !n.is_empty());
+        self.queue_clear(&target, who.sender(), note);
+        self.try_clear(&target).await;
+        self.agent(&target)
+            .ok_or_else(|| RpcError::not_found(format!("no agent '{target}'")))
+    }
+
+    /// Mark a clear as queued for `id`, by `by`, and say so.
+    pub(crate) fn queue_clear(&self, id: &str, by: &str, note: Option<String>) {
+        {
+            let mut model = self.model();
+            let rt = model.rt(id);
+            rt.clear_pending = true;
+            rt.clear_note = note.clone();
+            rt.clear_by = Some(by.to_string());
+        }
+        self.emit(
+            NewEvent::new(
+                "daemon",
+                "agent.clear_queued",
+                match &note {
+                    Some(note) => format!(
+                        "{by} queued a fresh start of {id}'s session: {}",
+                        truncate_chars(note, 160)
+                    ),
+                    None => format!("{by} queued a fresh start of {id}'s session"),
+                },
+            )
+            .agent(id),
+        );
+    }
+
+    /// Under `context: fresh`, a member's session ends with its card and a
+    /// fresh one takes the next: queued when `card` is finished, done when
+    /// the turn ends.
+    pub(crate) async fn clear_after_card(&self, id: &str, card: &str) {
+        let fresh = {
+            let mut model = self.model();
+            let fresh = model
+                .local
+                .get(id)
+                .is_some_and(|l| l.settings.fresh_context);
+            fresh && !model.rt(id).clear_pending
+        };
+        if !fresh || self.is_orchestrator(id) {
+            return;
+        }
+        self.queue_clear(
+            id,
+            "crew",
+            Some(format!(
+                "Card {card} is finished; on this team each card starts in a fresh session \
+(context: fresh)."
+            )),
+        );
+        self.try_clear(id).await;
+    }
+
+    /// Run a queued clear once the session is between turns: its process is
+    /// replaced by a fresh session of the same runtime and model, which is
+    /// told why, and any open card of the agent's is handed to it again.
+    ///
+    /// A boxed future with its own `Send` bound: a launch may read the
+    /// window and clear an idle member, which restarts, which launches; the
+    /// compiler cannot otherwise see the end of that.
+    pub(crate) fn try_clear<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(self.try_clear_now(id))
+    }
+
+    async fn try_clear_now(&self, id: &str) {
+        let Some(agent) = self.agent(id) else { return };
+        if agent.status.is_terminal()
+            || agent.status == AgentStatus::Spawning
+            || agent.paused
+            || agent.limit.is_some()
+            || matches!(agent.block_kind.as_deref(), Some("permission" | "dialog"))
+        {
+            return;
+        }
+        let (by, note) = {
+            let mut model = self.model();
+            let rt = model.rt(id);
+            if !rt.clear_pending || rt.turn_active {
+                return;
+            }
+            // Its work is over: a fresh session would have nothing to do.
+            if agent.status == AgentStatus::Done {
+                rt.clear_pending = false;
+                rt.clear_note = None;
+                rt.clear_by = None;
+                return;
+            }
+            rt.clear_pending = false;
+            rt.compact_keep = None;
+            rt.compact_sent_at = 0;
+            rt.context_warned = false;
+            (
+                rt.clear_by.take().unwrap_or_else(|| "crew".to_string()),
+                rt.clear_note.take(),
+            )
+        };
+        self.update_agent(id, |a| {
+            a.context = None;
+            a.compact_pending = false;
+            a.compactions = 0;
+        });
+        self.emit(
+            NewEvent::new(
+                "daemon",
+                "agent.cleared",
+                match &note {
+                    Some(note) => format!(
+                        "{id}'s session starts afresh ({by}): {}",
+                        truncate_chars(note, 160)
+                    ),
+                    None => format!("{id}'s session starts afresh ({by})"),
+                },
+            )
+            .agent(id)
+            .data(json!({ "by": by })),
+        );
+        let mut notice = format!(
+            "[crew] Your session was started afresh by {by}: nothing of the conversation before \
+it is kept. You are still {id} on this team, and your briefing is in place."
+        );
+        if let Some(note) = &note {
+            notice.push_str(&format!("\n{note}"));
+        }
+        notice.push_str(
+            "\nAn open card of yours is handed to you again as a [crew] task message: read it \
+with task_get, and the results and commits it builds on, rather than guessing what was done. If \
+nothing follows, there is nothing to do now.",
+        );
+        if let Err(e) = self.restart_agent_fresh_with(id, Some(notice)).await {
+            self.emit(
+                NewEvent::new(
+                    "daemon",
+                    "agent.clear_failed",
+                    format!("{id}'s session could not be started afresh: {}", e.message),
+                )
+                .agent(id)
+                .warn(),
+            );
         }
     }
 
@@ -555,16 +779,30 @@ carry on where you left off; if nothing was in progress, there is nothing to do 
         }
     }
 
-    /// The periodic part: start queued compactions whose moment has come.
+    /// The periodic part: start queued compactions and clears whose moment
+    /// has come.
     pub(crate) async fn context_housekeeping(&self) {
-        let pending: Vec<String> = self
-            .model()
-            .agents
-            .iter()
-            .filter(|a| a.compact_pending && a.status != AgentStatus::Spawning)
-            .map(|a| a.id.clone())
-            .collect();
-        for id in pending {
+        let (compactions, clears): (Vec<String>, Vec<String>) = {
+            let model = self.model();
+            (
+                model
+                    .agents
+                    .iter()
+                    .filter(|a| a.compact_pending && a.status != AgentStatus::Spawning)
+                    .map(|a| a.id.clone())
+                    .collect(),
+                model
+                    .agents
+                    .iter()
+                    .filter(|a| model.rt.get(&a.id).is_some_and(|rt| rt.clear_pending))
+                    .map(|a| a.id.clone())
+                    .collect(),
+            )
+        };
+        for id in clears {
+            self.try_clear(&id).await;
+        }
+        for id in compactions {
             self.try_compact(&id).await;
         }
     }

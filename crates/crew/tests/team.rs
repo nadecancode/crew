@@ -4085,7 +4085,7 @@ fn work_styles_are_launched_by_name_and_each_remembers_its_team() {
     assert!(!unknown.status.success());
     assert!(
         stderr(&unknown).contains(
-            "no work style 'nope' (available: default, research, experiment, cleanup, lab, notes)"
+            "no work style 'nope' (available: default, research, experiment, cleanup, gsd, lab, notes)"
         ),
         "{}",
         stderr(&unknown)
@@ -9628,4 +9628,401 @@ fn a_fresh_restart_hands_its_task_to_the_new_session_whatever_the_old_one_said_l
     up(2);
     s.wait_for("t1 to be handed to the new session", || handed() == 2);
     s.stop();
+}
+
+// ---------------------------------------------------------------------------
+// Guardrails: what a work style fixes, enforced by the daemon
+// ---------------------------------------------------------------------------
+
+#[test]
+fn under_hub_messaging_members_write_to_the_orchestrator_only() {
+    let s = Session::new();
+    let mut team = s.team(
+        "hub",
+        vec![agent("a", "", &[]), agent("b", "", &[])],
+        vec![task("write", "a", &[])],
+    );
+    team.guardrails.messaging = crew_core::guardrails::Messaging::Hub;
+    team.orchestrator = OrchestratorConfig {
+        agent: true,
+        runtime: Some(RuntimeKind::Shell),
+        command: scripted(&[]),
+        ..OrchestratorConfig::default()
+    };
+    s.run(&team);
+    s.wait_for("the author to be on write", || {
+        s.agent_cmd(&["output", "a"])
+            .contains("Task write is yours")
+    });
+    let send = |from: &str, to: &str, body: &str| {
+        let args = json!({ "to": to, "body": body, "type": "message" }).to_string();
+        s.ctl(from, &["tool", "agent_send", &args])
+    };
+    // A member to a teammate: refused, with where to write instead.
+    let refused = send("a", "b", "psst");
+    assert!(!refused.status.success());
+    let error = stderr(&refused);
+    assert!(
+        error.contains("write to orchestrator only (guardrails.messaging: hub)"),
+        "{error}"
+    );
+    assert!(
+        error.contains("put what b needs to orchestrator"),
+        "{error}"
+    );
+    assert!(!s.messages().iter().any(|m| m.body == "psst"));
+    // Nor a broadcast, nor a review request to a teammate.
+    let broadcast = s.ctl(
+        "a",
+        &[
+            "tool",
+            "agent_broadcast",
+            &json!({ "body": "all" }).to_string(),
+        ],
+    );
+    assert!(stderr(&broadcast).contains("nobody broadcasts but the orchestrator"));
+    let review = s.ctl(
+        "a",
+        &[
+            "tool",
+            "review_request",
+            &json!({ "agent_id": "b", "artifact": "x" }).to_string(),
+        ],
+    );
+    assert!(
+        stderr(&review).contains("reviews come from the board"),
+        "{}",
+        stderr(&review)
+    );
+    // To the orchestrator, and from it to anyone: fine.
+    let up = send("a", "orchestrator", "a question for you");
+    assert!(up.status.success(), "{}", stderr(&up));
+    let down = send("orchestrator", "b", "for you");
+    assert!(down.status.success(), "{}", stderr(&down));
+    let all = s.ctl(
+        "orchestrator",
+        &[
+            "tool",
+            "agent_broadcast",
+            &json!({ "body": "everyone" }).to_string(),
+        ],
+    );
+    assert!(all.status.success(), "{}", stderr(&all));
+    // The operator sends as before.
+    s.send("b", "from the operator");
+    let messages = s.messages();
+    let bodies: Vec<&str> = messages.iter().map(|m| m.body.as_str()).collect();
+    for body in [
+        "a question for you",
+        "for you",
+        "everyone",
+        "from the operator",
+    ] {
+        assert!(bodies.contains(&body), "{body} in {bodies:?}");
+    }
+}
+
+#[test]
+fn a_members_crew_tools_are_cut_by_its_declaration_and_its_identity_says_so() {
+    let s = Session::new();
+    let mut reader = agent("reader", "", &[]);
+    reader.crew_tools = Some(vec!["messaging".into()]);
+    let team = s.team(
+        "cut",
+        vec![reader, agent("writer", "", &[])],
+        vec![task("look", "reader", &[])],
+    );
+    s.run(&team);
+    s.wait_for("the reader to be on look", || {
+        s.agent_cmd(&["output", "reader"])
+            .contains("Task look is yours")
+    });
+    // Refused by the daemon, however it is asked.
+    let refused = s.ctl("reader", &["tool", "git_status", "{}"]);
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("git_status is not among the crew tools"),
+        "{}",
+        stderr(&refused)
+    );
+    let spawn = s.ctl(
+        "reader",
+        &[
+            "tool",
+            "agent_spawn",
+            &json!({ "task": "help" }).to_string(),
+        ],
+    );
+    assert!(
+        stderr(&spawn).contains("agent_spawn is not among"),
+        "{}",
+        stderr(&spawn)
+    );
+    // What is never taken away, and what it was given, work.
+    assert!(s
+        .ctl("reader", &["tool", "tasks_list", "{}"])
+        .status
+        .success());
+    let progress = json!({ "percent": 10, "message": "reading" }).to_string();
+    assert!(s
+        .ctl("reader", &["tool", "task_update", &progress])
+        .status
+        .success());
+    let sent = s.ctl(
+        "reader",
+        &[
+            "tool",
+            "agent_send",
+            &json!({ "to": "writer", "body": "hi" }).to_string(),
+        ],
+    );
+    assert!(sent.status.success(), "{}", stderr(&sent));
+    // A member left alone has everything.
+    assert!(s
+        .ctl("writer", &["tool", "git_status", "{}"])
+        .status
+        .success());
+    // The identity file names the reader's tools, for its MCP server's list.
+    let identity: Value =
+        serde_json::from_str(&std::fs::read_to_string(s.identity_path("reader")).unwrap()).unwrap();
+    let tools: Vec<&str> = identity["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t.as_str().unwrap())
+        .collect();
+    assert!(tools.contains(&"agent_send") && tools.contains(&"task_complete"));
+    assert!(!tools.contains(&"git_status") && !tools.contains(&"task_create"));
+    let writer: Value =
+        serde_json::from_str(&std::fs::read_to_string(s.identity_path("writer")).unwrap()).unwrap();
+    assert!(writer.get("tools").is_none());
+}
+
+#[test]
+fn the_orchestrator_lays_the_workflow_on_the_board_and_nothing_else() {
+    use crew_core::guardrails::{Step, Workflow};
+    let s = Session::new();
+    let mut team = s.team(
+        "flow",
+        vec![
+            agent("researcher", "", &["--on-task=done researched"]),
+            agent("planner", "", &[]),
+            agent("checker", "", &[]),
+        ],
+        vec![],
+    );
+    team.orchestrator = OrchestratorConfig {
+        agent: true,
+        runtime: Some(RuntimeKind::Shell),
+        command: scripted(&[]),
+        crew_tools: Some(vec!["workflow".into(), "task_edit".into()]),
+        ..OrchestratorConfig::default()
+    };
+    team.workflow = Some(Workflow {
+        steps: vec![
+            Step {
+                id: "research".into(),
+                agent: "researcher".into(),
+                produces: vec![".planning/{phase}/RESEARCH.md".into()],
+                description: "Research {phase} ({title}).\n\n{brief}".into(),
+                ..Step::default()
+            },
+            Step {
+                id: "plan".into(),
+                agent: "planner".into(),
+                reviewer: Some("checker".into()),
+                depends_on: vec!["research".into()],
+                description: "Plan {phase}.".into(),
+                ..Step::default()
+            },
+        ],
+    });
+    s.run(&team);
+    s.wait("the team to come up", |snap| {
+        snap.agents.len() == 4
+            && snap
+                .agents
+                .iter()
+                .all(|a| a.status != AgentStatus::Spawning)
+    });
+    // task_create is not the orchestrator's here.
+    let create = s.ctl(
+        "orchestrator",
+        &[
+            "tool",
+            "task_create",
+            &json!({ "id": "x", "description": "y" }).to_string(),
+        ],
+    );
+    assert!(
+        stderr(&create).contains("task_create is not among the crew tools"),
+        "{}",
+        stderr(&create)
+    );
+    let run = json!({ "phase": "03-auth", "title": "Authentication", "brief": "tokens, sessions" })
+        .to_string();
+    let out = s.ctl("orchestrator", &["tool", "workflow_run", &run]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("2 cards laid out"), "{text}");
+    assert!(
+        text.contains("research-03-auth [") && text.contains("plan-03-auth [queued] planner"),
+        "{text}"
+    );
+    let snapshot = s.wait("the research card to be done", |snap| {
+        find_task(snap, "research-03-auth").status == TaskStatus::Done
+    });
+    let research = find_task(&snapshot, "research-03-auth");
+    assert_eq!(
+        research.description,
+        "Research 03-auth (Authentication).\n\ntokens, sessions\n\nProduces: .planning/03-auth/RESEARCH.md"
+    );
+    assert_eq!(research.title, "research: Authentication");
+    let plan = find_task(&snapshot, "plan-03-auth");
+    assert_eq!(plan.dependencies, ["research-03-auth"]);
+    assert_eq!(plan.reviewer.as_deref(), Some("checker"));
+    assert_eq!(plan.assigned_agent.as_deref(), Some("planner"));
+    // Once the research is done the plan card moves on by itself.
+    s.wait("the plan to be handed out", |snap| {
+        find_task(snap, "plan-03-auth").status != TaskStatus::Queued
+    });
+    // The same phase again: refused whole, nothing added.
+    let again = s.ctl("orchestrator", &["tool", "workflow_run", &run]);
+    assert!(!again.status.success());
+    assert!(
+        stderr(&again).contains("already exists"),
+        "{}",
+        stderr(&again)
+    );
+    assert_eq!(s.snapshot().tasks.len(), 2);
+    assert!(s.events().iter().any(|e| e.event_type == "workflow.run"));
+}
+
+// ---------------------------------------------------------------------------
+// Clearing a context: a fresh session instead of a compaction
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_member_clears_its_own_context_and_its_card_reaches_the_fresh_session() {
+    let s = Session::new();
+    let team = s.team(
+        "clear",
+        vec![agent("author", "", &[]), agent("helper", "", &[])],
+        vec![task("write", "author", &[])],
+    );
+    s.run(&team);
+    s.wait_for("the author to be on write", || {
+        s.agent_cmd(&["output", "author"])
+            .contains("Task write is yours")
+    });
+    let before = find_agent(&s.snapshot(), "author").pid.unwrap();
+    // A teammate cannot clear another member; the orchestrator (none here)
+    // or the member itself can.
+    let other = s.ctl(
+        "helper",
+        &[
+            "tool",
+            "agent_clear",
+            &json!({ "id": "author" }).to_string(),
+        ],
+    );
+    assert!(!other.status.success());
+    assert!(stderr(&other).contains("only the orchestrator clears a teammate's"));
+    let out = s.ctl(
+        "author",
+        &[
+            "tool",
+            "agent_clear",
+            &json!({ "note": "start over, the draft was wrong" }).to_string(),
+        ],
+    );
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).contains("fresh start of author's session is queued"));
+    // A scripted agent is between turns: the clear runs at once. A new
+    // process, and the card handed to it again.
+    let snap = s.wait("the author to start afresh", |snap| {
+        find_agent(snap, "author")
+            .pid
+            .is_some_and(|pid| pid != before)
+            && find_agent(snap, "author").status != AgentStatus::Spawning
+    });
+    assert!(s.has_event("agent.clear_queued") && s.has_event("agent.cleared"));
+    let events = s.events();
+    let cleared = events
+        .iter()
+        .find(|e| e.event_type == "agent.cleared")
+        .unwrap();
+    assert!(
+        cleared
+            .message
+            .contains("author's session starts afresh (author): start over"),
+        "{}",
+        cleared.message
+    );
+    assert_eq!(find_agent(&snap, "author").compactions, 0);
+    s.wait("the card to be handed out again", |snap| {
+        find_task(snap, "write").status == TaskStatus::Working
+    });
+    assert!(
+        s.events()
+            .iter()
+            .filter(|e| e.event_type == "task.dispatched" && e.task_id.as_deref() == Some("write"))
+            .count()
+            >= 2
+    );
+}
+
+#[test]
+fn under_context_fresh_each_card_starts_in_a_new_session() {
+    let s = Session::new();
+    let mut team = s.team(
+        "fresh",
+        vec![agent("builder", "", &["--on-task=done built {task}"])],
+        vec![
+            task("first", "builder", &[]),
+            task("second", "builder", &["first"]),
+        ],
+    );
+    team.defaults.context = crew_core::config::ContextPolicy::Fresh;
+    s.run(&team);
+    let done = s.wait_all_done();
+    assert_eq!(find_task(&done, "first").status, TaskStatus::Done);
+    assert_eq!(find_task(&done, "second").status, TaskStatus::Done);
+    // The first card's end ended its session; the second ran in a new one.
+    let cleared: Vec<_> = s
+        .events()
+        .into_iter()
+        .filter(|e| e.event_type == "agent.cleared")
+        .collect();
+    assert!(!cleared.is_empty(), "no clear happened");
+    assert!(
+        cleared[0].message.contains("Card first is finished"),
+        "{}",
+        cleared[0].message
+    );
+    // A new process came up after the clear, and the second card went to
+    // it: its last dispatch follows the restart.
+    let events = s.events();
+    let restarted = events
+        .iter()
+        .find(|e| e.event_type == "agent.restart")
+        .expect("a restart")
+        .seq;
+    let dispatched = events
+        .iter()
+        .filter(|e| e.event_type == "task.dispatched" && e.task_id.as_deref() == Some("second"))
+        .map(|e| e.seq)
+        .max()
+        .expect("the second card dispatched");
+    assert!(
+        restarted < dispatched,
+        "restart {restarted}, dispatch {dispatched}"
+    );
+    assert!(
+        events
+            .iter()
+            .filter(|e| e.event_type == "agent.spawned")
+            .count()
+            >= 2
+    );
 }
