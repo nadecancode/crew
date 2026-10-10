@@ -1181,7 +1181,14 @@ mod empty_turn_tests {
             let mut model = daemon.model();
             let rt = model.rt("x");
             match runtime {
-                RuntimeKind::Codex => rt.rollout = Some(session.clone()),
+                RuntimeKind::Codex => {
+                    rt.rollout = Some(session.clone());
+                    // This fixture represents an already-confirmed parent.
+                    // Native admission is exercised separately from turn policy.
+                    let local = model.local.entry("x".into()).or_default();
+                    local.session_confirmed = true;
+                    local.codex_parent_session = Some("s-1".into());
+                }
                 _ => rt.transcript = Some(session.to_string_lossy().into_owned()),
             }
         }

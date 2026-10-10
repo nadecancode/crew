@@ -1,0 +1,415 @@
+{
+  "schema": 1,
+  "card": "codex-child-session-id",
+  "production": "190c354ab2ba6ea82c560303151a5fcbee708332",
+  "main": "201e7fdc9263fb30d1fb9716c73ff9fd181a6518",
+  "fixture_followup": "turns.rs test-only member_on declares its already-confirmed parent; no oracle or production change",
+  "workspace": {
+    "passed": 1383,
+    "failed": 5,
+    "ignored": 4,
+    "sole_failures": "five Codex empty_turn_tests missing parent confirmation in the fixture",
+    "correction": {
+      "filter": "daemon::turns::empty_turn_tests",
+      "passed": 10,
+      "failed": 0,
+      "ignored": 1
+    },
+    "unchanged_broad_suite_not_repeated": true
+  },
+  "initial_pipeline": {
+    "source": "190c354ab2ba6ea82c560303151a5fcbee708332",
+    "main": "201e7fdc",
+    "started": "2026-10-08T20:15:27.121Z",
+    "env": {
+      "CARGO_INCREMENTAL": "0",
+      "CREW_TEST_SANDBOX": "require",
+      "cleared": "GIT_*,HERDR_*,CREW_IDENTITY,CREW_SOCKET,CREW_LAUNCH"
+    },
+    "steps": [
+      {
+        "name": "fmt",
+        "command": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--check"
+        ],
+        "file": "target/codex-child/fmt-gate.log",
+        "began": "2026-10-08T20:15:27.125Z",
+        "ended": "2026-10-08T20:15:28.365Z",
+        "available_before": 145047339008,
+        "code": 0,
+        "signal": null,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "results": []
+      },
+      {
+        "name": "workspace",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "--workspace",
+          "--no-fail-fast",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/codex-child/workspace-gate.log",
+        "began": "2026-10-08T20:15:28.367Z",
+        "ended": "2026-10-08T20:33:42.401Z",
+        "available_before": 145047302144,
+        "code": 101,
+        "signal": null,
+        "sha256": "126ddd8d88073ae05dce897dc887904b3138a0fff9042a3e2e55cb44861aabea",
+        "results": [
+          "test result: FAILED. 586 passed; 5 failed; 1 ignored; 0 measured; 0 filtered out; finished in 263.23s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.45s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.37s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+          "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.76s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.82s",
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.40s",
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.37s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.74s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s",
+          "test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 70.02s",
+          "test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.26s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s",
+          "test result: ok. 89 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 471.67s",
+          "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 108.56s",
+          "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.84s",
+          "test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 45.77s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.58s",
+          "test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.72s",
+          "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+          "test result: ok. 78 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.95s",
+          "test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s",
+          "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+          "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+          "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+          "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s",
+          "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 92 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.17s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+          "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+          "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+          "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+          "test result: ok. 135 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 15.87s",
+          "test result: ok. 61 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.34s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+        ]
+      }
+    ],
+    "ended": "2026-10-08T20:33:42.402Z"
+  },
+  "followup_pipeline": {
+    "production": "190c354a",
+    "followup": "test-only empty_turn fixture confirmed parent state; reproducible native proof driver",
+    "steps": [
+      {
+        "name": "reproducer",
+        "command": [
+          "node",
+          "scripts/runtime/codex-child-proof.mjs",
+          "--crew",
+          "/home/nade/workspaces/personal/crew/.crew/worktrees/runtime/target/debug/crew",
+          "--codex",
+          "/nix/store/pmh4yzyd0g8rz5l1jv2lnsb2gz33ljhi-codex-0.159.0/libexec/codex",
+          "--python",
+          "/nix/store/0r6k8xa2kgqyp3r4v2w7yrb80ma2iawm-python3-3.13.12/bin/python3",
+          "--out",
+          "/home/nade/workspaces/personal/crew/.crew/worktrees/runtime/target/codex-child/reproducer"
+        ],
+        "file": "target/codex-child/reproducer-final.log",
+        "began": "2026-10-08T20:37:28.135Z",
+        "ended": "2026-10-08T20:37:51.109Z",
+        "available_before": 140291428352,
+        "code": 0,
+        "signal": null,
+        "sha256": "aff3ea0bdfe5e8be6a152c584f8e9952660fddee90f5a4503a351c94c2d0362e",
+        "results": []
+      },
+      {
+        "name": "empty-turns",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--lib",
+          "daemon::turns::empty_turn_tests",
+          "--",
+          "--nocapture"
+        ],
+        "file": "target/codex-child/empty-turns-final.log",
+        "began": "2026-10-08T20:37:51.112Z",
+        "ended": "2026-10-08T20:38:12.819Z",
+        "available_before": 140027793408,
+        "code": 0,
+        "signal": null,
+        "sha256": "94058263b527a7d6d4dbb262ddaa27d4954f19dba6d86f223b3aeb56f23c2530",
+        "results": [
+          "test result: ok. 10 passed; 0 failed; 1 ignored; 0 measured; 581 filtered out; finished in 4.69s"
+        ]
+      },
+      {
+        "name": "gateway",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--features",
+          "native-gateway",
+          "--test",
+          "native_gateway",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/codex-child/gateway-final.log",
+        "began": "2026-10-08T20:38:12.821Z",
+        "ended": "2026-10-08T20:38:57.418Z",
+        "available_before": 139988090880,
+        "code": 0,
+        "signal": null,
+        "sha256": "1ea45af914038c43942e7c69a2b0eaebcb6e9ee188791de08faf5c94fc0c1f8b",
+        "results": [
+          "test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.69s"
+        ]
+      },
+      {
+        "name": "inventory",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "crew",
+          "--features",
+          "native-gateway",
+          "--lib",
+          "native::",
+          "--",
+          "--test-threads=1"
+        ],
+        "file": "target/codex-child/inventory-final.log",
+        "began": "2026-10-08T20:38:57.419Z",
+        "ended": "2026-10-08T20:39:18.643Z",
+        "available_before": 139125125120,
+        "code": 0,
+        "signal": null,
+        "sha256": "d997f7eda145c907ba5159e07c57f95993ddb4726e16a9f785a578e26159fb48",
+        "results": [
+          "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 590 filtered out; finished in 0.32s"
+        ]
+      },
+      {
+        "name": "clippy",
+        "command": [
+          "cargo",
+          "clippy",
+          "--locked",
+          "--workspace",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "file": "target/codex-child/clippy-final.log",
+        "began": "2026-10-08T20:39:18.645Z",
+        "ended": "2026-10-08T20:39:36.524Z",
+        "available_before": 139052281856,
+        "code": 0,
+        "signal": null,
+        "sha256": "9cdd2860a9b973aeac91fce50791c2f3d3ea126420ccdd7b3439b21e72ea4392",
+        "results": []
+      },
+      {
+        "name": "clippy-gateway",
+        "command": [
+          "cargo",
+          "clippy",
+          "--locked",
+          "-p",
+          "crew",
+          "--features",
+          "native-gateway",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "file": "target/codex-child/clippy-gateway-final.log",
+        "began": "2026-10-08T20:39:36.527Z",
+        "ended": "2026-10-08T20:39:48.230Z",
+        "available_before": 139017842688,
+        "code": 0,
+        "signal": null,
+        "sha256": "9a0852ff4ad929d6401d104b9ed5effeee38f22c781a4e02092e4e406d2d5507",
+        "results": []
+      },
+      {
+        "name": "msrv",
+        "command": [
+          "./scripts/check-msrv"
+        ],
+        "file": "target/codex-child/msrv-final.log",
+        "began": "2026-10-08T20:39:48.232Z",
+        "ended": "2026-10-08T20:40:12.642Z",
+        "available_before": 138658091008,
+        "code": 0,
+        "signal": null,
+        "sha256": "a0ef23fd86fe159a2ec17441d0c03ea4ab916f0bb7c02bdaec721122ecf1704b",
+        "results": []
+      },
+      {
+        "name": "fmt",
+        "command": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--check"
+        ],
+        "file": "target/codex-child/fmt-final.log",
+        "began": "2026-10-08T20:40:12.644Z",
+        "ended": "2026-10-08T20:40:13.944Z",
+        "available_before": 138958581760,
+        "code": 0,
+        "signal": null,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "results": []
+      }
+    ],
+    "ended": "2026-10-08T20:40:13.944Z"
+  },
+  "native_fixture": {
+    "path": "crates/crew/tests/fixtures/codex-child/native-0.159.json",
+    "sha256": "261b4c56fb221a550aab742fbc578adf285bf6720040bcbe9828f248cc37aff4"
+  },
+  "native_proof": {
+    "path": "review/codex-child-session-id/native.json",
+    "sha256": "2daa73cc310b266d77e1e49e7c504b3b1da29fbc710b4d31c6608ab221b04e81",
+    "reproducer": {
+      "path": "scripts/runtime/codex-child-proof.mjs",
+      "sha256": "42a0066fd2c3ab7e968b06a6d920db9a908533383b166b484e09b6e9ccaae034",
+      "manifest": {
+        "recipe_revision": "378d0b43",
+        "recipe_sources": [
+          {
+            "name": "native.py",
+            "sha256": "667154dbc07fc0c146377989e9a9393dff8a3c76b5fc140d22adc75c3d119c37"
+          },
+          {
+            "name": "provider.py",
+            "sha256": "1f50c82c9a27642ab6f4be65c86ae1efff0bad4a119cd3affad15561c04566b3"
+          },
+          {
+            "name": "discovery.py",
+            "sha256": "e07b7ccaeebc3f984cdc123dc1cb52d9af36e774ab6bd65cefd3ef64a847d9b1"
+          }
+        ],
+        "crew_sha256": "925c34dbbe2749be9fae7259e70f203a30606324d446c8ed95206165802e8a18",
+        "codex_sha256": "d2752c52353401f7f6efbfcea68796f4f7a3d3e4769f5d1da53fa49d4856b72f",
+        "command": [
+          "bwrap",
+          "--unshare-net",
+          "--die-with-parent",
+          "--bind",
+          "/",
+          "/",
+          "--dev",
+          "/dev",
+          "--chdir",
+          "/home/nade/workspaces/personal/crew/.crew/worktrees/runtime",
+          "--",
+          "/nix/store/0r6k8xa2kgqyp3r4v2w7yrb80ma2iawm-python3-3.13.12/bin/python3",
+          "/home/nade/workspaces/personal/crew/.crew/worktrees/runtime/target/codex-child/reproducer/recipe/discovery.py",
+          "--crew",
+          "/home/nade/workspaces/personal/crew/.crew/worktrees/runtime/target/debug/crew",
+          "--sha256",
+          "925c34dbbe2749be9fae7259e70f203a30606324d446c8ed95206165802e8a18",
+          "--runtime",
+          "codex",
+          "--case",
+          "sources",
+          "--child",
+          "--out",
+          "/home/nade/workspaces/personal/crew/.crew/worktrees/runtime/target/codex-child/reproducer/fixture"
+        ],
+        "exit": 0,
+        "signal": null,
+        "provider_calls": 0,
+        "log_sha256": "12e271e4ae0d00a7ae298d3952b21a66aba81893d336442910ed31adb316af9e"
+      },
+      "proof": {
+        "passed": true,
+        "parents": [
+          "01a11d3c-4248-7f22-bc0f-c69acf7f73a4",
+          "01a11d3c-4270-7392-a9a1-723b682fbc81"
+        ],
+        "queue_threads": [
+          "01a11d3c-4248-7f22-bc0f-c69acf7f73a4",
+          "01a11d3c-4270-7392-a9a1-723b682fbc81"
+        ],
+        "cleanup": {
+          "remaining_processes": [],
+          "stop_returncode": 0
+        },
+        "report_sha256": "26d4e868dfa5b27c078a993667090726ab1d85605416977fc35f0d9de9785abb"
+      },
+      "proof_sha256": "f21d9b206e1d65d62e650dd57623cfafe121a88207287681626114c2ea9b87c6",
+      "manifest_sha256": "98195bffaa0dca52bc43f8b6e4122f310c50e92f18ee2dba58f87106ccd399c3"
+    }
+  },
+  "retained_default_binary": {
+    "path": "target/codex-child/pinned/crew-190-default",
+    "sha256": "0dd07917b17781badc37d04053b8c7d1946011381a1059cb035eba117b8ff58f"
+  },
+  "provider_calls": 0,
+  "operator_services_changed": false,
+  "known_residual": "A mismatched new root whose header stays unprovable is ignored; a previously proven binding remains until a later root proof or explicit fresh launch"
+}

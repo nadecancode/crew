@@ -521,6 +521,7 @@ fn resumed_restart_refreshes_mcp_catalog(runtime: RuntimeKind) {
     // The Codex stand-in does not make a turn; supply the same session
     // confirmation its native notify hook sends after a completed turn.
     if runtime == RuntimeKind::Codex {
+        common::codex_parent_rollout(&s.root().join("codex-home"), "toolbox-test-thread");
         let output = s
             .command()
             .args(["hook", "codex-notify", "--identity"])

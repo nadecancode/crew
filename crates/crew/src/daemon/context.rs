@@ -444,6 +444,9 @@ carry on where you left off; if nothing was in progress, there is nothing to do 
         let Some(session) = agent.session_id.clone() else {
             return Ok(TranscriptResult::default());
         };
+        if agent.runtime == RuntimeKind::Codex && !self.confirmed_codex_parent(id, &session) {
+            return Ok(TranscriptResult::default());
+        }
         let runtime = agent.runtime;
         let started = agent.started_at.unwrap_or_else(now_ms);
         let files = self

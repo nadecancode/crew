@@ -99,6 +99,10 @@ pub(crate) struct AgentLocal {
     pub claude_rebuild_prompt_session: Option<String>,
     /// The runtime reported its session id, so the session can be resumed.
     pub session_confirmed: bool,
+    /// Codex's own user thread, checked against its rollout header. Native
+    /// children reuse our notify command but never acquire this binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_parent_session: Option<String>,
     /// The agent's current launch (`CREW_LAUNCH` of the processes it
     /// started): kept across daemon restarts, so processes adopted then are
     /// still its own.
@@ -159,6 +163,9 @@ pub(crate) struct AgentRuntimeState {
     /// the bus messages it contains.
     pub pending_prompt: Option<(String, Vec<String>)>,
     pub turn_active: bool,
+    /// A notify could name a new root but its header was not provable.
+    /// Hold native queue/reads until a root is proved or a fresh launch starts.
+    pub codex_pending_thread: Option<String>,
     /// The active turn parked its card and must yield before another Ready
     /// card starts. A launch's optimistic turn flag is not this handoff.
     pub parking_turn: bool,

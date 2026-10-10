@@ -1,0 +1,227 @@
+{
+  "schema": 1,
+  "native_version": "0.159.0",
+  "native_sha256": "d2752c52353401f7f6efbfcea68796f4f7a3d3e4769f5d1da53fa49d4856b72f",
+  "crew_sha256": "cc01743082a2025a3a0493d66d5656f676429e79f6bef45b2112a345c4d657e6",
+  "provider_calls": 0,
+  "capture": "Network-isolated local synthetic Responses provider; notify wrapper logs then executes original Crew hook",
+  "normalization": "Fresh fixture root replaced with <FIXTURE>; rollout base_instructions and dynamic_tools omitted, all source/identity fields retained",
+  "pairs": [
+    {
+      "member": "left",
+      "parent_id": "01a11cdd-b8e7-7ef0-87bf-307fcdf930aa",
+      "child_id": "01a11cdd-dd99-74f0-815e-b141727e120a",
+      "cases": [
+        {
+          "role": "parent",
+          "notify": {
+            "type": "agent-turn-complete",
+            "thread-id": "01a11cdd-b8e7-7ef0-87bf-307fcdf930aa",
+            "turn-id": "01a11cdd-dd76-7b41-ad30-3b1a726bb400",
+            "cwd": "<FIXTURE>/work",
+            "client": "codex-tui",
+            "input-messages": [
+              "[crew] You are online as left. Nothing is assigned to you yet. Reply with one short line to confirm you are ready, then wait: tasks and messages will arrive as [crew] lines.",
+              "Toolbox acceptance left-discovery. Reply briefly after the requested fixture tool.",
+              "Toolbox acceptance left-child. Reply briefly after the requested fixture tool."
+            ],
+            "last-assistant-message": "Fixture response complete."
+          },
+          "session_meta": {
+            "timestamp": "2026-10-08T18:54:15.304Z",
+            "ordinal": 0,
+            "type": "session_meta",
+            "payload": {
+              "session_id": "01a11cdd-b8e7-7ef0-87bf-307fcdf930aa",
+              "id": "01a11cdd-b8e7-7ef0-87bf-307fcdf930aa",
+              "timestamp": "2026-10-08T18:54:15.275Z",
+              "cwd": "<FIXTURE>/work",
+              "runtime_workspace_roots": [
+                "<FIXTURE>/work"
+              ],
+              "originator": "codex-tui",
+              "cli_version": "0.159.0",
+              "source": "vscode",
+              "thread_source": "user",
+              "model_provider": "crew",
+              "history_mode": "paginated",
+              "context_window": {
+                "window_id": "01a11cdd-b8e8-75c2-8ba7-cefa9ec27c11"
+              },
+              "git": {
+                "commit_hash": "b09daf635c7a9214b450da6f4ff86ae525d465e1",
+                "branch": "main"
+              }
+            }
+          },
+          "notify_json_sha256": "abf2f041ca2fc52b25474618285fa57cb40993ad9e13f660cea113c1366fe313",
+          "rollout_sha256": "979600ab24695dfef0631fa7ea08fd6ab9e58942ffe162b5f466fb9569be5145"
+        },
+        {
+          "role": "child",
+          "notify": {
+            "type": "agent-turn-complete",
+            "thread-id": "01a11cdd-dd99-74f0-815e-b141727e120a",
+            "turn-id": "01a11cdd-ddb2-7432-a623-3576dd0a0735",
+            "cwd": "<FIXTURE>/work",
+            "input-messages": [],
+            "last-assistant-message": "Fixture response complete."
+          },
+          "session_meta": {
+            "timestamp": "2026-10-08T18:54:24.694Z",
+            "ordinal": 0,
+            "type": "session_meta",
+            "payload": {
+              "session_id": "01a11cdd-b8e7-7ef0-87bf-307fcdf930aa",
+              "id": "01a11cdd-dd99-74f0-815e-b141727e120a",
+              "parent_thread_id": "01a11cdd-b8e7-7ef0-87bf-307fcdf930aa",
+              "timestamp": "2026-10-08T18:54:24.668Z",
+              "cwd": "<FIXTURE>/work",
+              "runtime_workspace_roots": [
+                "<FIXTURE>/work"
+              ],
+              "originator": "codex-tui",
+              "cli_version": "0.159.0",
+              "source": {
+                "subagent": {
+                  "thread_spawn": {
+                    "parent_thread_id": "01a11cdd-b8e7-7ef0-87bf-307fcdf930aa",
+                    "depth": 1,
+                    "agent_path": "/root/sentinel_probe",
+                    "agent_nickname": "Hegel",
+                    "agent_role": null
+                  }
+                }
+              },
+              "thread_source": "subagent",
+              "agent_nickname": "Hegel",
+              "agent_path": "/root/sentinel_probe",
+              "model_provider": "crew",
+              "history_mode": "paginated",
+              "multi_agent_version": "v2",
+              "context_window": {
+                "window_id": "01a11cdd-dd99-74f0-815e-b154aeaf3f66"
+              },
+              "git": {
+                "commit_hash": "b09daf635c7a9214b450da6f4ff86ae525d465e1",
+                "branch": "main"
+              }
+            }
+          },
+          "notify_json_sha256": "62ed1569b1f384af59930ffbbf90638062e657218f48d2dc862fca650329e083",
+          "rollout_sha256": "9589fee3a90ddef0a58cc871c50241b98b8728bd22e02d3557d443b6a88d3de6"
+        }
+      ]
+    },
+    {
+      "member": "roles",
+      "parent_id": "01a11cdd-b99b-7e40-bcea-93d5b3c5ccc1",
+      "child_id": "01a11cdd-e8c4-7c70-a5d5-17ef8d7ca43b",
+      "cases": [
+        {
+          "role": "parent",
+          "notify": {
+            "type": "agent-turn-complete",
+            "thread-id": "01a11cdd-b99b-7e40-bcea-93d5b3c5ccc1",
+            "turn-id": "01a11cdd-e8a1-7a32-b082-59f7f10d1668",
+            "cwd": "<FIXTURE>/work",
+            "client": "codex-tui",
+            "input-messages": [
+              "[crew] You are online as roles. Nothing is assigned to you yet. Reply with one short line to confirm you are ready, then wait: tasks and messages will arrive as [crew] lines.",
+              "Toolbox acceptance roles-discovery. Reply briefly after the requested fixture tool.",
+              "Toolbox acceptance roles-child. Reply briefly after the requested fixture tool."
+            ],
+            "last-assistant-message": "Fixture response complete."
+          },
+          "session_meta": {
+            "timestamp": "2026-10-08T18:54:15.557Z",
+            "ordinal": 0,
+            "type": "session_meta",
+            "payload": {
+              "session_id": "01a11cdd-b99b-7e40-bcea-93d5b3c5ccc1",
+              "id": "01a11cdd-b99b-7e40-bcea-93d5b3c5ccc1",
+              "timestamp": "2026-10-08T18:54:15.454Z",
+              "cwd": "<FIXTURE>/work",
+              "runtime_workspace_roots": [
+                "<FIXTURE>/work"
+              ],
+              "originator": "codex-tui",
+              "cli_version": "0.159.0",
+              "source": "vscode",
+              "thread_source": "user",
+              "model_provider": "crew",
+              "history_mode": "paginated",
+              "context_window": {
+                "window_id": "01a11cdd-b99c-7b80-86e1-66275ed8242a"
+              },
+              "git": {
+                "commit_hash": "b09daf635c7a9214b450da6f4ff86ae525d465e1",
+                "branch": "main"
+              }
+            }
+          },
+          "notify_json_sha256": "44f231cb4d98b3e4ab47fc7a82b568a6f53782cd730635240c25824127a10047",
+          "rollout_sha256": "f9216760275020e0e3bda47019d1194cec4f48ef980353bb2841441cfd502320"
+        },
+        {
+          "role": "child",
+          "notify": {
+            "type": "agent-turn-complete",
+            "thread-id": "01a11cdd-e8c4-7c70-a5d5-17ef8d7ca43b",
+            "turn-id": "01a11cdd-e8dc-7cb3-a9e2-fe574c2d27af",
+            "cwd": "<FIXTURE>/work",
+            "input-messages": [],
+            "last-assistant-message": "Fixture response complete."
+          },
+          "session_meta": {
+            "timestamp": "2026-10-08T18:54:27.552Z",
+            "ordinal": 0,
+            "type": "session_meta",
+            "payload": {
+              "session_id": "01a11cdd-b99b-7e40-bcea-93d5b3c5ccc1",
+              "id": "01a11cdd-e8c4-7c70-a5d5-17ef8d7ca43b",
+              "parent_thread_id": "01a11cdd-b99b-7e40-bcea-93d5b3c5ccc1",
+              "timestamp": "2026-10-08T18:54:27.526Z",
+              "cwd": "<FIXTURE>/work",
+              "runtime_workspace_roots": [
+                "<FIXTURE>/work"
+              ],
+              "originator": "codex-tui",
+              "cli_version": "0.159.0",
+              "source": {
+                "subagent": {
+                  "thread_spawn": {
+                    "parent_thread_id": "01a11cdd-b99b-7e40-bcea-93d5b3c5ccc1",
+                    "depth": 1,
+                    "agent_path": "/root/sentinel_probe",
+                    "agent_nickname": "Noether",
+                    "agent_role": null
+                  }
+                }
+              },
+              "thread_source": "subagent",
+              "agent_nickname": "Noether",
+              "agent_path": "/root/sentinel_probe",
+              "model_provider": "crew",
+              "history_mode": "paginated",
+              "multi_agent_version": "v2",
+              "context_window": {
+                "window_id": "01a11cdd-e8c4-7c70-a5d5-17f802dfd0f9"
+              },
+              "git": {
+                "commit_hash": "b09daf635c7a9214b450da6f4ff86ae525d465e1",
+                "branch": "main"
+              }
+            }
+          },
+          "notify_json_sha256": "5bde0cb9a2d6642109f0f75d2a007773b3cf4b9675db3662af29e1006410a906",
+          "rollout_sha256": "ff6db869f3bdfd4caac6e91d5225250a5f57d46376ce349c2cc323bf9473722a"
+        }
+      ]
+    }
+  ],
+  "cleanup": {
+    "remaining_processes": [],
+    "stop_returncode": 0
+  }
+}

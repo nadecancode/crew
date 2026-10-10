@@ -4663,6 +4663,7 @@ fn a_usage_limit_parks_the_agent_until_it_is_resumed() {
         let out = s.crew(&["hook", event, "--identity", &identity(agent), payload]);
         assert!(out.status.success(), "{event}: {}", stderr(&out));
     };
+    codex_parent_rollout(&s.root().join("codex-home"), "thread-e2e");
     hook(
         "codex-1",
         "codex-notify",
@@ -5537,6 +5538,7 @@ fn the_orchestrator_sees_full_context_windows_and_queues_compactions() {
 
     // Codex: the figure comes from its session file, and the operator
     // queues the compaction. The agent is at rest, so it is asked at once.
+    codex_parent_rollout(&s.root().join("codex-home"), "thread-ctx");
     hook(
         "codex-1",
         "codex-notify",
@@ -7134,6 +7136,7 @@ fn a_member_the_work_style_moves_to_another_cli_keeps_getting_its_tasks_and_come
     // Codex's turn ends. The window resets and a reading says so. qa
     // finishes t1, and goes back to Claude Code before it is handed t2: were
     // t2 handed to it on Codex, it would stay there as long as work came.
+    codex_parent_rollout(&s.root().join("codex-home"), "thread-qa");
     hook(
         "qa",
         "codex-notify",
@@ -7812,6 +7815,7 @@ fn a_turn_codexs_model_refuses_is_noticed_and_whoever_waits_on_it_is_told() {
                 .all(|a| a.status != AgentStatus::Spawning)
     });
     let identity = s.identity_path("rev").to_string_lossy().into_owned();
+    codex_parent_rollout(&s.root().join("codex-home"), "thread-cyber");
     let out = s.crew(&[
         "hook",
         "codex-notify",
@@ -8021,6 +8025,7 @@ fn a_turn_codex_refuses_goes_to_the_work_styles_pi_model_and_the_member_comes_ba
         let out = s.crew(&["hook", event, "--identity", &identity, payload]);
         assert!(out.status.success(), "{event}: {}", stderr(&out));
     };
+    codex_parent_rollout(&s.root().join("codex-home"), "thread-handover");
     hook(
         "codex-notify",
         r#"{"type":"agent-turn-complete","thread-id":"thread-handover"}"#,
@@ -8220,6 +8225,7 @@ fn a_member_that_took_over_a_refused_turn_goes_back_before_its_next_task() {
         let out = s.crew(&["hook", event, "--identity", &identity, payload]);
         assert!(out.status.success(), "{event}: {}", stderr(&out));
     };
+    codex_parent_rollout(&s.root().join("codex-home"), "thread-queue");
     hook(
         "codex-notify",
         r#"{"type":"agent-turn-complete","thread-id":"thread-queue"}"#,
@@ -9187,6 +9193,7 @@ fn a_fresh_restart_starts_a_new_session_instead_of_resuming_the_old_one() {
     up(1);
     // Its session (thread) becomes known, the way Codex's notify hook says.
     let identity = s.workspace.join(".crew/agents/x/identity.json");
+    codex_parent_rollout(&s.root().join("codex-home"), "old-thread");
     let notify = s
         .command()
         .args(["hook", "codex-notify", "--identity"])
@@ -9289,6 +9296,7 @@ fn a_restart_takes_over_from_a_restart_still_starting() {
     });
     s.wait_for("its session", || !sessions().is_empty());
     let identity = s.workspace.join(".crew/agents/x/identity.json");
+    codex_parent_rollout(&s.root().join("codex-home"), "old-thread");
     let notify = s
         .command()
         .args(["hook", "codex-notify", "--identity"])

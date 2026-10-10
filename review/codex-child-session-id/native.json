@@ -1,0 +1,163 @@
+{
+  "schema": 1,
+  "source": "190c354ab2ba6ea82c560303151a5fcbee708332",
+  "main": "201e7fdc",
+  "codex_version": "0.159.0",
+  "codex_sha256": "d2752c52353401f7f6efbfcea68796f4f7a3d3e4769f5d1da53fa49d4856b72f",
+  "crew_sha256": "0dd07917b17781badc37d04053b8c7d1946011381a1059cb035eba117b8ff58f",
+  "provider_calls": 0,
+  "network": "bubblewrap --unshare-net; synthetic loopback provider; fresh dummy-auth homes",
+  "before": {
+    "pairs": [
+      {
+        "member": "left",
+        "parent_id": "01a11cdd-b8e7-7ef0-87bf-307fcdf930aa",
+        "recorded_after_child": "01a11cdd-dd99-74f0-815e-b141727e120a"
+      },
+      {
+        "member": "roles",
+        "parent_id": "01a11cdd-b99b-7e40-bcea-93d5b3c5ccc1",
+        "recorded_after_child": "01a11cdd-e8c4-7c70-a5d5-17ef8d7ca43b"
+      }
+    ],
+    "report_sha256": "e13ac3cdf98fb611a829509b4c0ba32de95cacdad635d4a9b3f1318d4097dca5",
+    "cleanup": {
+      "remaining_processes": [],
+      "stop_returncode": 0
+    }
+  },
+  "after": {
+    "parent_ids_unchanged": true,
+    "queued_after_children": [
+      {
+        "member": "left",
+        "expected_parent": "01a11d26-0146-7871-ba21-1fbc8ac822a5",
+        "actual_session_id": "01a11d26-0146-7871-ba21-1fbc8ac822a5",
+        "receipt": true
+      },
+      {
+        "member": "roles",
+        "expected_parent": "01a11d26-0241-7922-9121-20cb883f2444",
+        "actual_session_id": "01a11d26-0241-7922-9121-20cb883f2444",
+        "receipt": true
+      }
+    ],
+    "queue_threads": [
+      "01a11d26-0146-7871-ba21-1fbc8ac822a5",
+      "01a11d26-0241-7922-9121-20cb883f2444"
+    ],
+    "only_expected_parents": true,
+    "native_child_threads": [
+      "01a11d26-266f-76c3-a0c7-bb6562998579",
+      "01a11d26-3190-7f13-a7c3-b9c097144e1d"
+    ],
+    "cleanup": {
+      "remaining_processes": [],
+      "stop_returncode": 0
+    },
+    "provider_calls": 0,
+    "report_sha256": "023e2cc049dc36fef54836c5d824e8cfe6795813c4c954e9712b29a43efc3ed1",
+    "queue_sha256": "62393e78cf61011bfbab2315a460053888086f1e3e84ec5102c38c25d544cc2e"
+  },
+  "notifications": [
+    {
+      "type": "agent-turn-complete",
+      "thread_id": "01a11d26-0146-7871-ba21-1fbc8ac822a5",
+      "turn_id": "01a11d26-015a-76e2-8918-eec73f3634b9",
+      "client": "codex-tui"
+    },
+    {
+      "type": "agent-turn-complete",
+      "thread_id": "01a11d26-01d7-7542-b7b5-bd6f2c5cf356",
+      "turn_id": "01a11d26-0228-7992-8582-b245f6a1ee0f",
+      "client": "codex-tui"
+    },
+    {
+      "type": "agent-turn-complete",
+      "thread_id": "01a11d26-0241-7922-9121-20cb883f2444",
+      "turn_id": "01a11d26-0277-7f83-82b3-f5f3133a6a1b",
+      "client": "codex-tui"
+    },
+    {
+      "type": "agent-turn-complete",
+      "thread_id": "01a11d26-0146-7871-ba21-1fbc8ac822a5",
+      "turn_id": "01a11d26-0461-7ae0-a1a0-5e905f4c1e69",
+      "client": "codex-tui"
+    },
+    {
+      "type": "agent-turn-complete",
+      "thread_id": "01a11d26-01d7-7542-b7b5-bd6f2c5cf356",
+      "turn_id": "01a11d26-0fad-7a93-9c1e-2aaa42011823",
+      "client": "codex-tui"
+    },
+    {
+      "type": "agent-turn-complete",
+      "thread_id": "01a11d26-0241-7922-9121-20cb883f2444",
+      "turn_id": "01a11d26-1b06-77f1-ab0e-2b6f580dbc76",
+      "client": "codex-tui"
+    },
+    {
+      "type": "agent-turn-complete",
+      "thread_id": "01a11d26-0146-7871-ba21-1fbc8ac822a5",
+      "turn_id": "01a11d26-2653-7c31-b765-cbbb37c4b0df",
+      "client": "codex-tui"
+    },
+    {
+      "type": "agent-turn-complete",
+      "thread_id": "01a11d26-266f-76c3-a0c7-bb6562998579",
+      "turn_id": "01a11d26-2688-7211-b613-779035aa1654",
+      "client": null
+    },
+    {
+      "type": "agent-turn-complete",
+      "thread_id": "01a11d26-0241-7922-9121-20cb883f2444",
+      "turn_id": "01a11d26-3173-7b20-a4a4-60221851fe2a",
+      "client": "codex-tui"
+    },
+    {
+      "type": "agent-turn-complete",
+      "thread_id": "01a11d26-3190-7f13-a7c3-b9c097144e1d",
+      "turn_id": "01a11d26-31a8-7f11-b9d1-48fc22a931bc",
+      "client": null
+    },
+    {
+      "type": "agent-turn-complete",
+      "thread_id": "01a11d26-0146-7871-ba21-1fbc8ac822a5",
+      "turn_id": "01a11d26-41bb-74e1-b206-8c7aeba54f1c",
+      "client": "codex-tui"
+    },
+    {
+      "type": "agent-turn-complete",
+      "thread_id": "01a11d26-0241-7922-9121-20cb883f2444",
+      "turn_id": "01a11d26-48cf-70e1-ac82-5e9d623c96d1",
+      "client": "codex-tui"
+    }
+  ],
+  "retained": {
+    "before_report": "target/codex-child/native-before-02/report.json",
+    "after_report": "target/codex-child/native-delivery/report.json",
+    "after_raw_notifications": "target/codex-child/probe/notifications-delivery.jsonl",
+    "notifications_sha256": "d203012d014a27ca611b4956481c96aa9aa05d8453eab19112a99436a694d5ea",
+    "queue": "target/codex-child/probe/queue-delivery.jsonl",
+    "command": "target/codex-child/native-delivery-command.json"
+  },
+  "recipe": {
+    "revision": "378d0b43",
+    "copies": [
+      {
+        "name": "native.py",
+        "original_sha256": "667154dbc07fc0c146377989e9a9393dff8a3c76b5fc140d22adc75c3d119c37"
+      },
+      {
+        "name": "provider.py",
+        "original_sha256": "1f50c82c9a27642ab6f4be65c86ae1efff0bad4a119cd3affad15561c04566b3"
+      },
+      {
+        "name": "discovery.py",
+        "original_sha256": "e07b7ccaeebc3f984cdc123dc1cb52d9af36e774ab6bd65cefd3ef64a847d9b1"
+      }
+    ],
+    "instrumentation": "notify logger forwards original authenticated hook unchanged; queue logger records only target/remote arguments",
+    "extension": "two normal bus deliveries after actual children; parent native reply receipts required"
+  }
+}

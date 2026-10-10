@@ -545,6 +545,7 @@ left off; if you were in the middle of a step, check its state before repeating 
                     local.home = None;
                 }
                 local.session_confirmed = false;
+                local.codex_parent_session = None;
                 local.no_long_context = false;
                 local.long_context = false;
                 local.handoff = Some(brief);

@@ -112,6 +112,9 @@ impl Daemon {
         if stopped() {
             return Ok(());
         }
+        // Before resume or fallback reads the old conversation, prove that
+        // an older build did not persist a native child's thread id.
+        self.prepare_codex_parent_resume(id, resume).await;
         // A model known to be out starts on the work style's fallback.
         let fresh = !(resume
             && self
@@ -148,11 +151,13 @@ impl Daemon {
             // hook) does not hand it back.
             agent.session_id = chosen_session_id(agent.runtime);
             local.session_confirmed = false;
-            self.model()
-                .local
-                .entry(id.to_string())
-                .or_default()
-                .session_confirmed = false;
+            local.codex_parent_session = None;
+            {
+                let mut model = self.model();
+                let stored = model.local.entry(id.to_string()).or_default();
+                stored.session_confirmed = false;
+                stored.codex_parent_session = None;
+            }
             self.save_local(id);
             self.update_agent(id, |a| a.session_id = agent.session_id.clone());
         }

@@ -191,7 +191,10 @@ fn codex(args: &[String]) -> Result<()> {
         write(
             &rollout,
             &format!(
-                "{}\n",
+                "{}\n{}\n",
+                json!({ "type":"session_meta", "timestamp":now.to_rfc3339(),
+                    "payload":{"id":"fake-thread","session_id":"fake-thread",
+                    "source":"vscode","thread_source":"user"} }),
                 json!({ "type": "response_item", "timestamp": now.to_rfc3339(),
                         "payload": { "type": "message", "role": "assistant",
                                      "content": [{ "type": "output_text", "text": "hello from the fake" }] } })

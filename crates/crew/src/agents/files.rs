@@ -10,6 +10,7 @@
 //! `<A>/identity.json` or `/etc/passwd` named there is not read.
 
 use std::fs::File;
+use std::io::{BufRead, BufReader, Read};
 #[cfg(test)]
 use std::os::fd::AsFd;
 use std::path::{Path, PathBuf};
@@ -31,9 +32,17 @@ pub struct Opened {
     pub path: PathBuf,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CodexHeader {
+    Parent,
+    Child,
+    Unavailable,
+}
+
 /// The sub-path of the private home Claude Code and Codex use.
 const CLAUDE_PROJECTS: &str = "rw/home/claude/projects";
 const CODEX_SESSIONS: &str = "rw/home/codex/sessions";
+const CODEX_HEADER_BYTES: u64 = 256 * 1024;
 
 impl AgentFiles {
     /// The files of an agent whose directories exist: opened beneath the state
@@ -123,6 +132,66 @@ impl AgentFiles {
                     path: agent_dir.join(rel),
                 })
             }
+        }
+    }
+
+    /// Validate only the first record of this exact thread's own rollout.
+    /// Children inherit session_id, so identity is payload.id, not that alias.
+    /// These files remain untrusted; a missing or oversized header proves nothing.
+    pub(crate) fn codex_parent_thread(&self, thread: &str, started_ms: i64) -> bool {
+        self.codex_thread_header(thread, started_ms) == CodexHeader::Parent
+    }
+
+    pub(crate) fn codex_thread_header(&self, thread: &str, started_ms: i64) -> CodexHeader {
+        if thread.len() > 256 || session_file_name(thread).is_none() {
+            return CodexHeader::Unavailable;
+        }
+        // UUIDv7 names contain the creation time. A resumed user thread can
+        // predate the member's latest launch by weeks; the time is only a
+        // bounded lookup hint, never identity or parenthood proof.
+        let born = uuid::Uuid::parse_str(thread).ok().and_then(|uuid| {
+            let bytes = uuid.as_bytes();
+            (bytes[6] >> 4 == 7).then(|| {
+                bytes[..6]
+                    .iter()
+                    .fold(0_i64, |millis, byte| (millis << 8) | i64::from(*byte))
+            })
+        });
+        let Some(opened) = self
+            .codex_rollout(thread, started_ms)
+            .or_else(|| self.codex_rollout(thread, born?))
+        else {
+            return CodexHeader::Unavailable;
+        };
+        let mut reader = BufReader::new(opened.file.take(CODEX_HEADER_BYTES + 1));
+        let mut line = Vec::new();
+        if reader.read_until(b'\n', &mut line).is_err() || line.len() as u64 > CODEX_HEADER_BYTES {
+            return CodexHeader::Unavailable;
+        }
+        let Ok(header) = serde_json::from_slice::<serde_json::Value>(&line) else {
+            return CodexHeader::Unavailable;
+        };
+        if header["type"] != "session_meta" || header["payload"]["id"].as_str() != Some(thread) {
+            return CodexHeader::Unavailable;
+        }
+        let payload = &header["payload"];
+        let source = &payload["source"];
+        if payload["thread_source"] == "subagent"
+            || source.get("subagent").is_some()
+            || source.as_str() == Some("subagent")
+        {
+            return CodexHeader::Child;
+        }
+        // Older rollouts lack thread_source. Their root source is a string;
+        // native descendants use the tagged subagent object, never that form.
+        let root = match payload.get("thread_source") {
+            Some(value) => value == "user" && !source.is_null(),
+            None => source.as_str().is_some_and(|value| !value.is_empty()),
+        };
+        if root {
+            CodexHeader::Parent
+        } else {
+            CodexHeader::Unavailable
         }
     }
 }
