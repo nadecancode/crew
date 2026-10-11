@@ -334,16 +334,20 @@ mod tests {
             Some(orchestrator),
             "task_create"
         ));
+        // The researcher writes its RESEARCH.md itself (no shell); the
+        // team stays on the standard window, a card at a time.
         let researcher = gsd.agents.iter().find(|a| a.id == "researcher").unwrap();
         assert_eq!(
             researcher.tools.as_deref(),
             Some(
                 &[
                     crew_core::guardrails::ToolClass::Read,
+                    crew_core::guardrails::ToolClass::Write,
                     crew_core::guardrails::ToolClass::Web
                 ][..]
             )
         );
+        assert!(!gsd.defaults.long_context);
         assert!(gsd.tasks.iter().any(|t| t.id == "roadmap"));
         let research = styles.get("research").unwrap();
         assert_eq!(research.staffing(), "staffed by the orchestrator");

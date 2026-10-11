@@ -351,6 +351,10 @@ until the database takes writes again, tasks wait where they are.",
         explicit: bool,
     ) -> Result<(), RpcError> {
         let now = now_ms();
+        // A clear that waited while the member was at rest runs first (the
+        // card is still ready, so nothing of it is in the old session), and
+        // the card goes to the fresh session.
+        self.clear_before_card(agent_id).await;
         // Check-and-set: only a task that is still ready, and is this agent's,
         // is handed out, so a task is never dispatched twice, nor without its
         // owner (an assignment the database refused).
@@ -1139,7 +1143,11 @@ yourself"
         self.project_task(&author);
         if was_current {
             self.settle(&author);
-            self.clear_after_card(&author, &updated.id).await;
+            // A card under review may come back: its session ends with the
+            // verdict (see `submit_review`), not with the submission.
+            if reviewer.is_none() {
+                self.clear_after_card(&author, &updated.id).await;
+            }
         }
         self.replan();
         self.auto_advance();
@@ -1579,6 +1587,10 @@ sends it back to {} for another round, task_edit revises it first, task_fail dro
                 self.finish_task(&updated, author).await;
                 if tasks::executing_task(&self.model().tasks, author).is_none() {
                     self.settle(author);
+                    // Finished for good: under `context: fresh` the author's
+                    // session ends with the card (an author on to its next
+                    // card already keeps that one's session).
+                    self.clear_after_card(author, task_id).await;
                 }
             } else if escalate.is_some() {
                 // The author is free of it until the orchestrator decides.

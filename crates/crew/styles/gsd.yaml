@@ -79,6 +79,9 @@ instructions: |
   - A card is done only with what its step produces in its commit; a plan
     goes back to the planner at most three times, then the card is yours
     to decide on (task_retry for another round, task_edit, or task_fail).
+    A fourth round seldom earns its cost: settle what the checker still
+    objects to yourself (task_edit the card with the decision, or defer
+    the point) rather than send the plan around again.
   - You route; you do not build, research or verify. Members write to you
     only: carry what one needs from another with task_edit or a message.
   - When every phase has passed, session_complete.
@@ -88,6 +91,10 @@ defaults:
   # Each card starts in a fresh session: what a card needs is on the board
   # and under .planning/, never in a teammate's conversation.
   context: fresh
+  # A card fits the standard window, and the runtime compacts a session that
+  # fills it. In the 1M window nothing compacts, and every request past
+  # 200k tokens is priced in the long-context tier.
+  long_context: false
   model_fallbacks:
     fable: [opus]
   refusal_fallbacks: [glm-5.3, deepseek-v4-flash]
@@ -98,7 +105,7 @@ agents:
   - id: researcher
     role: Phase researcher. Reads the codebase and the requirements and writes RESEARCH.md for a phase.
     model: opus
-    tools: [read, web]
+    tools: [read, write, web]
     crew_tools: [messaging, git]
   - id: planner
     role: Planner. Writes the project roadmap and queues its phases; turns each phase's research into PLAN.md and declares its slices.

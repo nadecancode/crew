@@ -10295,3 +10295,164 @@ fn under_context_fresh_each_card_starts_in_a_new_session() {
             >= 2
     );
 }
+
+/// A member whose card ends with nothing else on the board rests in its
+/// session (a restart would make a session with nothing to do); the clear
+/// runs as its next card comes, before the card is handed to it.
+#[test]
+fn under_context_fresh_a_member_at_rest_is_cleared_as_its_next_card_comes() {
+    let s = Session::new();
+    let mut team = s.team(
+        "fresh-rest",
+        vec![agent("builder", "", &["--on-task=done built {task}"])],
+        vec![task("first", "builder", &[])],
+    );
+    team.defaults.context = crew_core::config::ContextPolicy::Fresh;
+    s.run(&team);
+    s.wait("the builder at rest after first", |snap| {
+        find_task(snap, "first").status == TaskStatus::Done
+            && find_agent(snap, "builder").status == AgentStatus::Done
+    });
+    s.wait_for("the clear to be queued", || {
+        s.has_event("agent.clear_queued")
+    });
+    // Nothing to do: the session stays, the clear waits.
+    assert!(
+        !s.has_event("agent.cleared"),
+        "cleared with no card to start"
+    );
+    assert!(
+        !s.has_event("agent.restart"),
+        "restarted with no card to start"
+    );
+
+    let ws = s.workspace.to_string_lossy().into_owned();
+    s.ok(&[
+        "task", "add", "--id", "second", "--agent", "builder", "-C", &ws,
+    ]);
+    let done = s.wait_all_done();
+    assert_eq!(find_task(&done, "second").status, TaskStatus::Done);
+    let events = s.events();
+    let cleared = events
+        .iter()
+        .find(|e| e.event_type == "agent.cleared")
+        .expect("a clear before the second card");
+    assert!(
+        cleared.message.contains("Card first is finished"),
+        "{}",
+        cleared.message
+    );
+    let restarted = events
+        .iter()
+        .find(|e| e.event_type == "agent.restart")
+        .expect("a restart")
+        .seq;
+    let dispatched = events
+        .iter()
+        .filter(|e| e.event_type == "task.dispatched" && e.task_id.as_deref() == Some("second"))
+        .map(|e| e.seq)
+        .min()
+        .expect("the second card dispatched");
+    assert!(
+        cleared.seq < dispatched && restarted < dispatched,
+        "cleared {}, restart {restarted}, dispatch {dispatched}",
+        cleared.seq
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.event_type == "task.dispatched" && e.task_id.as_deref() == Some("second"))
+            .count(),
+        1,
+        "the second card was dispatched more than once"
+    );
+}
+
+/// A reviewed card is finished with the verdict, not the submission: sent
+/// back, it returns to the session that wrote it; approved, that session
+/// ends with it.
+#[test]
+fn under_context_fresh_a_card_sent_back_by_its_reviewer_returns_to_its_session() {
+    let s = Session::new();
+    let mut team = s.team(
+        "fresh-review",
+        vec![
+            agent("author", "", &["--on-task=done finished {task}"]),
+            agent("critic", "", &["--on-review=wait-message operator"]),
+        ],
+        vec![task("first", "author", &[])],
+    );
+    team.defaults.context = crew_core::config::ContextPolicy::Fresh;
+    team.tasks[0].reviewer = Some("critic".into());
+    s.run(&team);
+    s.wait("the first submission", |snap| {
+        find_task(snap, "first").status == TaskStatus::Review
+    });
+    let verdict = |approve: bool, comments: &str| {
+        let args =
+            serde_json::json!({ "task_id": "first", "approve": approve, "comments": comments })
+                .to_string();
+        let out = s.ctl("critic", &["tool", "review_submit", &args]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    verdict(false, "please fix");
+    // The card goes back to the author, in the session that wrote it.
+    s.wait("the card back with the author", |snap| {
+        find_task(snap, "first").status == TaskStatus::Working
+    });
+    let again = s.ctl(
+        "author",
+        &[
+            "tool",
+            "task_complete",
+            r#"{"task_id":"first","result":"finished again"}"#,
+        ],
+    );
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    s.wait("the second submission", |snap| {
+        find_task(snap, "first").status == TaskStatus::Review
+    });
+    let author_events = |kind: &str| {
+        s.events()
+            .into_iter()
+            .filter(|e| e.event_type == kind && e.agent_id.as_deref() == Some("author"))
+            .count()
+    };
+    assert_eq!(
+        author_events("agent.clear_queued"),
+        0,
+        "cleared on submission"
+    );
+    assert_eq!(
+        author_events("agent.spawned"),
+        1,
+        "restarted between rounds"
+    );
+
+    verdict(true, "fine");
+    let done = s.wait_all_done();
+    assert_eq!(find_task(&done, "first").status, TaskStatus::Done);
+    s.wait_for("the clear queued by the approval", || {
+        author_events("agent.clear_queued") == 1
+    });
+    let events = s.events();
+    let approved = events
+        .iter()
+        .find(|e| e.event_type == "task.approved")
+        .expect("an approval")
+        .seq;
+    let queued = events
+        .iter()
+        .find(|e| e.event_type == "agent.clear_queued")
+        .expect("a queued clear")
+        .seq;
+    assert!(approved < queued, "approved {approved}, queued {queued}");
+}

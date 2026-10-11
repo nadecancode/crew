@@ -186,7 +186,7 @@ keeping."
                 self.try_clear(&agent.id).await;
                 self.notify_orchestrator(&format!(
                     "{}'s context window was {figures} with no open card: its session is started \
-afresh (nothing to keep), so its next card starts clean.",
+afresh (nothing to keep), by its next card at the latest, so that card starts clean.",
                     agent.id
                 ))
                 .await;
@@ -409,8 +409,10 @@ clear it",
     }
 
     /// Under `context: fresh`, a member's session ends with its card and a
-    /// fresh one takes the next: queued when `card` is finished, done when
-    /// the turn ends.
+    /// fresh one takes the next: queued when `card` is finished (approved,
+    /// done without a review, or failed; not when it is sent for review,
+    /// which may send it back), done when the turn ends — or, for a member
+    /// at rest with nothing open, right before its next card.
     pub(crate) async fn clear_after_card(&self, id: &str, card: &str) {
         let fresh = {
             let mut model = self.model();
@@ -445,10 +447,18 @@ clear it",
         &'a self,
         id: &'a str,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(self.try_clear_now(id))
+        Box::pin(self.try_clear_now(id, false))
     }
 
-    async fn try_clear_now(&self, id: &str) {
+    /// A clear queued while `id` was at rest runs now, as its next card is
+    /// about to be handed to it: the card goes to the fresh session.
+    pub(crate) async fn clear_before_card(&self, id: &str) {
+        if self.model().rt(id).clear_pending {
+            self.try_clear_now(id, true).await;
+        }
+    }
+
+    async fn try_clear_now(&self, id: &str, for_card: bool) {
         let Some(agent) = self.agent(id) else { return };
         if agent.status.is_terminal()
             || agent.status == AgentStatus::Spawning
@@ -464,11 +474,10 @@ clear it",
             if !rt.clear_pending || rt.turn_active {
                 return;
             }
-            // Its work is over: a fresh session would have nothing to do.
-            if agent.status == AgentStatus::Done {
-                rt.clear_pending = false;
-                rt.clear_note = None;
-                rt.clear_by = None;
+            // Its work is over for now: a fresh session would have nothing
+            // to do, and a session at rest costs nothing. The clear waits,
+            // and runs when its next card comes (`clear_before_card`).
+            if agent.status == AgentStatus::Done && !for_card {
                 return;
             }
             rt.clear_pending = false;

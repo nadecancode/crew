@@ -2004,9 +2004,13 @@ crew lets the orchestrator do it deliberately instead:
   orchestrator. The orchestrator's own window is compacted, never cleared:
   it holds the plan. With `defaults.context: fresh` (or `context: fresh` on
   a member) every card starts in a fresh session: the session is cleared
-  when a card is finished, so what the next card needs must be on the board
-  (results, commits) rather than in the conversation. The built-in `gsd`
-  style works this way.
+  when a card is finished — approved, done without a review, or failed; a
+  card sent back by its reviewer stays in the session that wrote it — so
+  what the next card needs must be on the board (results, commits) rather
+  than in the conversation. A member at rest after its card keeps its
+  session, at no cost, until its next card comes: the clear runs then, and
+  the card goes to the fresh session. The built-in `gsd` style works this
+  way.
 
 **The 1M-token window.** Models that have one (`long_context = true` in the
 [model catalog](#model-catalog): Fable, Opus and Sonnet; GPT-6 Astra, GPT-6.1
@@ -2018,8 +2022,10 @@ overrides its team documents for the window, `-c model_context_window=1000000
 -c model_auto_compact_token_limit=900000`; Codex itself caps them at what the
 account's model allows, and the box on the dashboard shows the window the
 session actually has. `defaults.long_context: false` turns the request off
-for a team. A model set by the [endpoint config](#endpoints-and-keys) is
-passed as written.
+for a team: the built-in `gsd` style does, since a card fits the standard
+window, nothing compacts a session in the 1M one, and every request past
+200k tokens is priced in the long-context tier. A model set by the
+[endpoint config](#endpoints-and-keys) is passed as written.
 
 crew does not summarise anything itself: the compaction is the runtime's
 own. For Claude Code it is the engine's compact call (what `/compact` runs),
