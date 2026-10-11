@@ -9805,7 +9805,17 @@ fn the_orchestrator_lays_the_workflow_on_the_board_and_nothing_else() {
     let mut team = s.team(
         "flow",
         vec![
-            agent("researcher", "", &["--on-task=done researched"]),
+            // The step produces RESEARCH.md: the card is done only with it
+            // in a commit.
+            agent(
+                "researcher",
+                "",
+                &[
+                    "--on-task=write .planning/03-auth/RESEARCH.md found: tokens",
+                    "--on-task=commit research 03-auth",
+                    "--on-task=done researched",
+                ],
+            ),
             agent("planner", "", &[]),
             agent("checker", "", &[]),
         ],
@@ -9822,20 +9832,21 @@ fn the_orchestrator_lays_the_workflow_on_the_board_and_nothing_else() {
         steps: vec![
             Step {
                 id: "research".into(),
-                agent: "researcher".into(),
+                agent: Some("researcher".into()),
                 produces: vec![".planning/{phase}/RESEARCH.md".into()],
                 description: "Research {phase} ({title}).\n\n{brief}".into(),
                 ..Step::default()
             },
             Step {
                 id: "plan".into(),
-                agent: "planner".into(),
+                agent: Some("planner".into()),
                 reviewer: Some("checker".into()),
                 depends_on: vec!["research".into()],
                 description: "Plan {phase}.".into(),
                 ..Step::default()
             },
         ],
+        ..Workflow::default()
     });
     s.run(&team);
     s.wait("the team to come up", |snap| {
@@ -9890,12 +9901,236 @@ fn the_orchestrator_lays_the_workflow_on_the_board_and_nothing_else() {
     let again = s.ctl("orchestrator", &["tool", "workflow_run", &run]);
     assert!(!again.status.success());
     assert!(
-        stderr(&again).contains("already exists"),
+        stderr(&again).contains("was run already"),
         "{}",
         stderr(&again)
     );
     assert_eq!(s.snapshot().tasks.len(), 2);
     assert!(s.events().iter().any(|e| e.event_type == "workflow.run"));
+    // The research landed on the integration branch when its card was
+    // completed (a workflow team in worktrees lands every card), and the
+    // planner's worktree took it when its card was handed out.
+    assert!(
+        s.events().iter().any(|e| e.event_type == "workflow.landed"
+            && e.message
+                .contains("research-03-auth landed on agents/integration")),
+        "{:?}",
+        s.events()
+            .iter()
+            .map(|e| e.event_type.clone())
+            .collect::<Vec<_>>()
+    );
+    let planner_tree = s.workspace.join(".crew/worktrees/planner");
+    s.wait("the planner's worktree to take what landed", |_| {
+        planner_tree.join(".planning/03-auth/RESEARCH.md").exists()
+    });
+    assert!(
+        !s.workspace.join(".planning").exists(),
+        "the base checkout is never touched"
+    );
+    // Where the phase stands is read off its cards: `crew status` says
+    // which step it is on, and the dashboard's strip the same.
+    let status = s.ok(&["status", "-C", &s.workspace.to_string_lossy()]);
+    assert!(
+        status.contains("workflow   03-auth (Authentication): research ✓ · plan "),
+        "{status}"
+    );
+    let frame = s.ok(&[
+        "status",
+        "--frame",
+        "120x30",
+        "-C",
+        &s.workspace.to_string_lossy(),
+    ]);
+    assert!(
+        frame.contains("workflow phase 1/1 · 03-auth (Authentication): research ✓ · plan "),
+        "{frame}"
+    );
+    let info = s.snapshot().session;
+    let workflow = info.workflow.expect("the session carries the workflow");
+    assert_eq!(workflow.phases[0].cards["research"], "research-03-auth");
+    assert_eq!(workflow.phases[0].cards["plan"], "plan-03-auth");
+}
+
+/// Slices of a phase run side by side on the executors, each in its own
+/// worktree; what each completes lands on the integration branch, and a
+/// card that comes after (a slice that waits for it, the verify step)
+/// starts from what landed, nobody merging by hand.
+#[test]
+fn slices_run_side_by_side_and_their_work_lands_for_what_comes_after() {
+    use crew_core::guardrails::{Scope, Step, Workflow};
+    let s = Session::new();
+    let slices = json!({
+        "phase": "p1",
+        "slices": [
+            { "id": "api", "title": "API", "brief": "the api", "touches": ["src/api"] },
+            { "id": "ui", "title": "UI", "brief": "the ui", "touches": ["src/ui"] },
+            // Named after ui, and writing under api's paths: after both.
+            { "id": "docs", "title": "Docs", "brief": "the docs", "depends": ["ui"], "touches": ["src/api/README.md"] },
+        ],
+    })
+    .to_string();
+    let executor = |id: &str| {
+        agent(
+            id,
+            "",
+            &[
+                "--on-task=write src/{task}.txt by {me}",
+                "--on-task=commit {task}",
+                "--on-task=done executed",
+            ],
+        )
+    };
+    let mut team = s.team(
+        "slices",
+        vec![
+            agent(
+                "planner",
+                "",
+                &[
+                    "--on-task=write .planning/p1/PLAN.md three slices",
+                    "--on-task=commit plan p1",
+                    &format!("--on-task=tool workflow_slices {slices}"),
+                    "--on-task=done planned",
+                ],
+            ),
+            executor("executor-1"),
+            executor("executor-2"),
+            agent("verifier", "", &["--on-task=done verified"]),
+        ],
+        vec![],
+    );
+    team.orchestrator = OrchestratorConfig {
+        agent: true,
+        runtime: Some(RuntimeKind::Shell),
+        command: scripted(&[]),
+        crew_tools: Some(vec!["workflow".into()]),
+        ..OrchestratorConfig::default()
+    };
+    team.workflow = Some(Workflow {
+        steps: vec![
+            Step {
+                id: "plan".into(),
+                agent: Some("planner".into()),
+                produces: vec![".planning/{phase}/PLAN.md".into()],
+                description: "Plan {phase}.".into(),
+                ..Step::default()
+            },
+            Step {
+                id: "execute".into(),
+                scope: Scope::Slice,
+                agent: Some("executor-1".into()),
+                agents: vec!["executor-2".into()],
+                depends_on: vec!["plan".into()],
+                description: "Execute {slice}: {slice_brief}".into(),
+                ..Step::default()
+            },
+            Step {
+                id: "verify".into(),
+                agent: Some("verifier".into()),
+                depends_on: vec!["execute".into()],
+                description: "Verify {phase}.".into(),
+                ..Step::default()
+            },
+        ],
+        ..Workflow::default()
+    });
+    s.run(&team);
+    s.wait("the team to come up", |snap| {
+        snap.agents.len() == 5
+            && snap
+                .agents
+                .iter()
+                .all(|a| a.status != AgentStatus::Spawning)
+    });
+    let run = json!({ "phase": "p1", "title": "First", "brief": "go" }).to_string();
+    let out = s.ctl("orchestrator", &["tool", "workflow_run", &run]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let snapshot = s.wait("the verify card to be done", |snap| {
+        snap.tasks
+            .iter()
+            .any(|t| t.id == "verify-p1" && t.status == TaskStatus::Done)
+    });
+    // The slices took turns over the executors; docs waited for both the
+    // slice it named and the one whose paths it writes under.
+    let api = find_task(&snapshot, "execute-p1-api");
+    let ui = find_task(&snapshot, "execute-p1-ui");
+    let docs = find_task(&snapshot, "execute-p1-docs");
+    assert_eq!(api.assigned_agent.as_deref(), Some("executor-1"));
+    assert_eq!(ui.assigned_agent.as_deref(), Some("executor-2"));
+    assert_eq!(docs.assigned_agent.as_deref(), Some("executor-1"));
+    assert_eq!(api.dependencies, ["plan-p1"]);
+    assert_eq!(ui.dependencies, ["plan-p1"]);
+    assert_eq!(
+        docs.dependencies,
+        ["plan-p1", "execute-p1-ui", "execute-p1-api"]
+    );
+    assert!(docs.started_at.unwrap() >= ui.completed_at.unwrap());
+    assert!(docs.started_at.unwrap() >= api.completed_at.unwrap());
+    let verify = find_task(&snapshot, "verify-p1");
+    assert_eq!(
+        verify.dependencies,
+        ["execute-p1-api", "execute-p1-ui", "execute-p1-docs"]
+    );
+    // Every completed card with commits landed; the run records as what.
+    let workflow = snapshot.session.workflow.expect("the workflow");
+    let phase = &workflow.phases[0];
+    let mut landed: Vec<&str> = phase.landed.keys().map(String::as_str).collect();
+    landed.sort();
+    assert_eq!(
+        landed,
+        [
+            "execute-p1-api",
+            "execute-p1-docs",
+            "execute-p1-ui",
+            "plan-p1"
+        ],
+        "{:?}",
+        phase.landed
+    );
+    assert_eq!(phase.slices[2].depends, ["ui", "api"]);
+    assert_eq!(phase.slices[2].touches, ["src/api/README.md"]);
+    // The verifier's worktree took every slice's work when its card was
+    // handed out; executor-1 took ui's (executor-2's) before docs.
+    let tree = |agent: &str| s.workspace.join(".crew/worktrees").join(agent);
+    for slice in ["api", "ui", "docs"] {
+        assert!(
+            tree("verifier")
+                .join(format!("src/execute-p1-{slice}.txt"))
+                .exists(),
+            "the verifier starts from slice {slice}"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(tree("executor-1").join("src/execute-p1-ui.txt"))
+            .unwrap()
+            .trim(),
+        "by executor-2"
+    );
+    assert!(
+        !s.workspace.join("src").exists(),
+        "the base checkout is never touched"
+    );
+    let status = s.ok(&["status", "-C", &s.workspace.to_string_lossy()]);
+    assert!(
+        status.contains("plan ✓ · execute [api ✓ · ui ✓ · docs ✓] · verify ✓"),
+        "{status}"
+    );
+    // Each slice wrote src/<card>.txt, outside what it said it touches:
+    // said when the card was done, held against nothing.
+    let strayed: Vec<String> = s
+        .events()
+        .iter()
+        .filter(|e| e.event_type == "workflow.strayed")
+        .map(|e| e.message.clone())
+        .collect();
+    assert!(
+        strayed.iter().any(|m| m.contains(
+            "slice api (execute-p1-api) wrote outside what it touches (src/api): src/execute-p1-api.txt"
+        )),
+        "{strayed:?}"
+    );
+    assert_eq!(strayed.len(), 3, "{strayed:?}");
 }
 
 // ---------------------------------------------------------------------------

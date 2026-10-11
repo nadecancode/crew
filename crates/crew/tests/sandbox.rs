@@ -775,6 +775,105 @@ fn sandboxed_agent_can_do_its_work() {
     s.stop();
 }
 
+/// A workflow team lands each completed card on the integration branch
+/// and hands the next card out from it; under required sandboxes both
+/// merges run in a helper sandbox (the landing in the integration
+/// worktree's, the sync in the member's), and still land.
+#[test]
+fn a_workflow_team_lands_its_cards_through_the_helper_sandbox() {
+    use crew_core::config::OrchestratorConfig;
+    use crew_core::guardrails::{Step, Workflow};
+    use crew_core::RuntimeKind;
+    if require_sandbox().is_none() {
+        return;
+    }
+    let s = Session::new();
+    workspace_repo(&s, &[]);
+    let mut team = sandboxed(
+        &s,
+        vec![
+            agent(
+                "researcher",
+                "",
+                &[
+                    "--on-task=write .planning/p1/RESEARCH.md found",
+                    "--on-task=commit research p1",
+                    "--on-task=done researched",
+                ],
+            ),
+            agent("planner", "", &["--on-task=done planned"]),
+        ],
+        vec![],
+    );
+    team.orchestrator = OrchestratorConfig {
+        agent: true,
+        runtime: Some(RuntimeKind::Shell),
+        command: common::scripted(&[]),
+        crew_tools: Some(vec!["workflow".into()]),
+        ..OrchestratorConfig::default()
+    };
+    team.workflow = Some(Workflow {
+        steps: vec![
+            Step {
+                id: "research".into(),
+                agent: Some("researcher".into()),
+                produces: vec![".planning/{phase}/RESEARCH.md".into()],
+                description: "Research {phase}.".into(),
+                ..Step::default()
+            },
+            Step {
+                id: "plan".into(),
+                agent: Some("planner".into()),
+                depends_on: vec!["research".into()],
+                description: "Plan {phase}.".into(),
+                ..Step::default()
+            },
+        ],
+        ..Workflow::default()
+    });
+    s.run(&team);
+    s.wait("the team to come up", |snap| {
+        snap.agents.len() == 3
+            && snap
+                .agents
+                .iter()
+                .all(|a| a.status != AgentStatus::Spawning)
+    });
+    let run = serde_json::json!({ "phase": "p1", "title": "First", "brief": "go" }).to_string();
+    let out = s.ctl("orchestrator", &["tool", "workflow_run", &run]);
+    assert!(out.status.success(), "{}", common::stderr(&out));
+    let done = s.wait("the plan card to be done", |snap| {
+        snap.tasks
+            .iter()
+            .any(|t| t.id == "plan-p1" && t.status == TaskStatus::Done)
+    });
+    assert_eq!(find_task(&done, "research-p1").status, TaskStatus::Done);
+    assert!(
+        s.events().iter().any(|e| e.event_type == "workflow.landed"
+            && e.message
+                .contains("research-p1 landed on agents/integration")),
+        "{:?}",
+        s.events()
+            .iter()
+            .filter(|e| e.event_type.starts_with("vcs.") || e.event_type.starts_with("workflow."))
+            .map(|e| format!("{} {}", e.event_type, e.message))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        done.session.workflow.unwrap().phases[0].landed.len(),
+        1,
+        "the research landed, the plan (no commit) had nothing to"
+    );
+    // The planner's card started from what landed.
+    let planner_tree = s.workspace.join(".crew/worktrees/planner");
+    assert!(
+        planner_tree.join(".planning/p1/RESEARCH.md").exists(),
+        "the planner's worktree took the integration branch"
+    );
+    assert!(!s.workspace.join(".planning").exists());
+    s.stop();
+}
+
 #[test]
 fn an_agent_moves_files_between_directories_of_its_worktree_and_not_out_of_it() {
     if require_sandbox().is_none() {

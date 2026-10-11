@@ -15,7 +15,7 @@ use crew_core::config::TeamConfig;
 use crew_core::paths::{self, DaemonInfo};
 use crew_core::rpc::{Push, RpcError, SessionInfo, Snapshot};
 use crew_core::util::now_ms;
-use crew_core::{Agent, AgentStatus, EventLevel, Task};
+use crew_core::{Agent, AgentStatus, EventLevel, Task, TaskStatus};
 use serde::{Deserialize, Serialize};
 use tokio::net::UnixListener;
 use tokio::sync::{broadcast, mpsc, watch, Notify};
@@ -77,6 +77,13 @@ pub(crate) struct SessionState {
     /// Why it is git although jj is the default; empty otherwise.
     #[serde(default)]
     pub vcs_note: String,
+    /// The units of work the style's workflow was laid out for
+    /// (`workflow_run`), oldest first, each with its cards.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workflow_runs: Vec<crew_core::workflow::WorkflowPhase>,
+    /// Units queued for the workflow (`workflow_phases`), next first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workflow_queue: Vec<crew_core::guardrails::PhaseSpec>,
 }
 
 /// Per-agent state that is persisted but is not part of the public `Agent`.
@@ -281,6 +288,8 @@ pub(crate) struct Model {
     pub tokens: HashMap<String, String>,
     pub local: HashMap<String, AgentLocal>,
     pub rt: HashMap<String, AgentRuntimeState>,
+    /// An auto-advance of the workflow is under way (guardrails.rs).
+    pub auto_advancing: bool,
     /// Usage windows of the accounts the team runs on, newest readings.
     pub quotas: Vec<crew_core::rpc::Quota>,
     /// The stall currently observed: its fingerprint, when it was first
@@ -612,6 +621,72 @@ impl Daemon {
         });
     }
 
+    /// Take cards off the board that were never started (slices laid out
+    /// again before any of them began): all or none. Each is deleted from
+    /// the store and the model, and every client is told to read the board
+    /// again (`Push::Resync`), since a card has no removal push of its own.
+    pub(crate) fn remove_unstarted_tasks(&self, ids: &[String]) -> Result<Vec<Task>, RpcError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        // The epic projection (a feature a client may hold) mirrors the
+        // board in its own tables; it has no removal, so a board it holds
+        // keeps its cards.
+        if self.feature_services.task_projection().is_some() {
+            return Err(RpcError::conflict(
+                "cards cannot be taken off the board while it is projected into epics",
+            ));
+        }
+        let removed = {
+            let mut model = self.model();
+            let mut removed = Vec::with_capacity(ids.len());
+            for id in ids {
+                let task = model
+                    .task(id)
+                    .cloned()
+                    .ok_or_else(|| RpcError::not_found(format!("no task '{id}'")))?;
+                if task.started_at.is_some()
+                    || !matches!(task.status, TaskStatus::Queued | TaskStatus::Ready)
+                {
+                    return Err(RpcError::conflict(format!(
+                        "task {id} is {} and stays on the board",
+                        task.status
+                    )));
+                }
+                if let Some(dependent) = model
+                    .tasks
+                    .iter()
+                    .find(|t| !ids.contains(&t.id) && t.dependencies.contains(id))
+                {
+                    return Err(RpcError::conflict(format!(
+                        "task {id} stays on the board: {} depends on it",
+                        dependent.id
+                    )));
+                }
+                removed.push(task);
+            }
+            for id in ids {
+                self.store
+                    .delete_task(id)
+                    .map_err(|e| RpcError::internal(format!("removing task {id} failed: {e:#}")))?;
+                model.tasks.retain(|t| &t.id != id);
+            }
+            removed
+        };
+        for task in &removed {
+            self.emit(
+                NewEvent::new(
+                    "scheduler",
+                    "task.removed",
+                    format!("task {} taken off the board (never started)", task.id),
+                )
+                .task(&task.id),
+            );
+        }
+        self.push(Push::Resync);
+        Ok(removed)
+    }
+
     /// Apply a change to a task, or `None` if there is no such task or the
     /// change could not be stored (logged; nothing changed then).
     pub(crate) fn update_task(&self, id: &str, f: impl FnOnce(&mut Task)) -> Option<Task> {
@@ -811,6 +886,21 @@ impl Daemon {
                 .map(|t| t.objective.clone())
                 .unwrap_or_default(),
             style: s.team.as_ref().and_then(|t| t.style.clone()),
+            workflow: s
+                .team
+                .as_ref()
+                .and_then(|t| t.workflow.as_ref())
+                .map(|workflow| crew_core::workflow::WorkflowInfo {
+                    steps: workflow
+                        .steps
+                        .iter()
+                        .map(|step| crew_core::workflow::StepInfo {
+                            id: step.id.clone(),
+                            slice: step.scope == crew_core::guardrails::Scope::Slice,
+                        })
+                        .collect(),
+                    phases: s.workflow_runs.clone(),
+                }),
             quotas: model.quotas.clone(),
             workspace: self.workspace.to_string_lossy().into_owned(),
             state_dir: self.state_dir.to_string_lossy().into_owned(),

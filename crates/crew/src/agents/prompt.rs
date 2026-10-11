@@ -145,9 +145,34 @@ unit before is done or when the unit does not depend on it.",
     if !guardrails::crew_tool_allowed(selection, "task_create") {
         out.push_str(" Cards go on the board through workflow_run and no other way.");
     }
+    if workflow.has_slices() {
+        out.push_str(
+            " A step marked per slice runs once per slice of the unit, side by side on the \
+members listed: declare the slices with workflow_slices(phase, slices) as soon as the step before \
+them says what they are (a plan's parts that do not depend on one another); the steps after them \
+are laid out then and wait for every slice. Each slice says in touches which paths it writes: \
+two slices that touch the same paths take turns, a slice that names none takes its turn alone, \
+and a slice with depends waits for those. A slice that writes outside its touches is reported \
+when its card is done. Declared again before any slice starts, the slices are replaced.",
+        );
+    }
+    out.push_str(
+        " In worktrees, every completed card lands on the integration branch (agents/integration) \
+before it counts as done, and each card starts from it: the owner's worktree takes the branch \
+when the card is handed out, so a card builds on every card before it without merging by hand.",
+    );
+    if workflow.order == crew_core::guardrails::Order::Sequential {
+        out.push_str(
+            " Units run one at a time: workflow_run is refused while the last unit has an open \
+card, or while its verdict does not let the next one start.",
+        );
+    }
     out.push('\n');
     for (i, step) in workflow.steps.iter().enumerate() {
-        let _ = write!(out, "{}. {} → {}", i + 1, step.id, step.agent);
+        let _ = write!(out, "{}. {} → {}", i + 1, step.id, step.owners().join(", "));
+        if step.scope == crew_core::guardrails::Scope::Slice {
+            out.push_str(" (per slice)");
+        }
         if let Some(reviewer) = &step.reviewer {
             let _ = write!(out, ", reviewed by {reviewer}");
         }
@@ -156,6 +181,15 @@ unit before is done or when the unit does not depend on it.",
         }
         if !step.produces.is_empty() {
             let _ = write!(out, " (produces {})", step.produces.join(", "));
+        }
+        if let Some(verdict) = &step.verdict {
+            let _ = write!(
+                out,
+                "; its {} line in {} decides the unit: {}",
+                verdict.key,
+                verdict.file,
+                verdict.choices()
+            );
         }
         out.push('\n');
     }
@@ -216,7 +250,11 @@ fn roster(view: &TeamView<'_>, me: &str) -> String {
 /// The orchestrator's line about workflow_run, offered with a workflow.
 const TOOL_WORKFLOW: &str = "\
 - workflow_run(phase, title, brief) — lay the team's workflow on the board for one unit of work: \
-one card per step, named <step>-<phase>, assigned and chained as the workflow says (see Workflow).";
+one card per step, named <step>-<phase>, assigned and chained as the workflow says (see Workflow).
+- workflow_slices(phase, slices) — declare a unit's slices ([{id, title, brief, touches, \
+depends?}]) once its plan says what they are: each slice step gets a card per slice, side by side \
+(slices whose touches overlap take turns), named <step>-<phase>-<slice>, and the steps after them \
+follow.";
 
 const TOOLS_COMMON: &str = "\
 - agents_list() — who is on the team, their role, status and current task.
@@ -241,7 +279,9 @@ const TOOLS_WORKER: &str = "\
 - agent_status(status, note, task_id?) — set your status where crew cannot tell it: waiting (park a card) on something other than a question you asked, or blocked.
 - git_commit(message) — commit everything in your worktree; returns the commit id.
 - git_diff(against?) / git_status() — inspect your changes.
-- git_cherry_pick(commit) / git_merge(from_agent) — bring a teammate's work into your branch.
+- git_cherry_pick(commit) / git_merge(from_agent) — bring a teammate's work into your branch; \
+git_merge(from_agent: \"integration\") brings the integration branch, where a workflow team's \
+completed cards land.
 - review_request(agent_id, artifact) — ask a teammate to review something.
 - review_submit(task_id, approve, comments) — answer a review request you received.
 - task_complete(result) — finish your current task (call it once, after committing).
@@ -249,6 +289,13 @@ const TOOLS_WORKER: &str = "\
 - decline(reason) — you will not do what you were just asked, because it goes against your \
 guidelines or usage policies: crew hands it to another model. Text you write in this session \
 reaches nobody, so a refusal in words alone goes unseen.
+- workflow_slices(phase, slices) — for the unit your open card belongs to: declare its slices \
+([{id, title, brief, touches, depends?}]) once your plan says what they are; each runs side by \
+side, a slice with depends after those, slices whose touches (the paths they write) overlap take \
+turns, and one with no touches runs alone. Declare them again, before any slice starts, to \
+replace them.
+- workflow_phases(phases) — queue the units of work a roadmap lists ([{id, title, brief}]), in \
+order; crew (or the orchestrator) runs them in turn.
 - agent_spawn(task, role?, id?) — launch a subagent of your own for a self-contained piece of \
 your task. It is a full teammate with its own worktree branched from yours; it reports back to \
 you with a message (and commit ids) when it is done.";
@@ -1338,20 +1385,21 @@ mod tests {
             steps: vec![
                 Step {
                     id: "research".into(),
-                    agent: "researcher".into(),
+                    agent: Some("researcher".into()),
                     produces: vec![".planning/{phase}/RESEARCH.md".into()],
                     description: "x".into(),
                     ..Step::default()
                 },
                 Step {
                     id: "plan".into(),
-                    agent: "planner".into(),
+                    agent: Some("planner".into()),
                     reviewer: Some("researcher".into()),
                     depends_on: vec!["research".into()],
                     description: "y".into(),
                     ..Step::default()
                 },
             ],
+            ..Workflow::default()
         };
         let view = TeamView {
             project: "demo",
@@ -1421,7 +1469,11 @@ tools.\n"
         assert!(
             lead.contains("## Workflow\n")
                 && lead.contains(
-                    "Cards go on the board through workflow_run and no other way.\n\
+                    "Cards go on the board through workflow_run and no other way. In worktrees, \
+every completed card lands on the integration branch (agents/integration)"
+                )
+                && lead.contains(
+                    "without merging by hand.\n\
 1. research → researcher (produces .planning/{phase}/RESEARCH.md)\n\
 2. plan → planner, reviewed by researcher, after research\n"
                 ),

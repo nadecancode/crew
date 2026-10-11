@@ -1,7 +1,7 @@
 // How the TUI words and marks things (crates/crew-tui/src/theme.rs,
 // widgets/agent_box.rs, crew_core::util), so both dashboards read the same.
 
-import type { Agent, AgentStatus, RuntimeKind, Task, TaskStatus } from "./protocol";
+import type { Agent, AgentStatus, RuntimeKind, Task, TaskStatus, WorkflowInfo, WorkflowPhase } from "./protocol";
 
 export const SPINNER = ["◐", "◓", "◑", "◒"];
 export const SPINNER_MS = 150;
@@ -212,4 +212,55 @@ export function resetTime(ms: number, nowMs: number): string {
   const d = new Date(ms);
   const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   return new Date(nowMs).toDateString() === d.toDateString() ? hm : `${d.toLocaleDateString(undefined, { weekday: "short" })} ${hm}`;
+}
+
+/** A card's mark in a workflow line, as `crew_core::workflow::mark`. */
+const WORKFLOW_MARK: Record<TaskStatus, string> = {
+  done: "✓", working: "●", review: "◐", waiting: "◔", blocked: "✗", failed: "✗", queued: "○", ready: "○",
+};
+
+/** `✓`, or `● planner` for a card at work, `◐ checker` for one in review, as `card_text`. */
+function workflowCard(task: Task | undefined): string {
+  if (!task) return "?";
+  const who = task.status === "review" ? task.reviewer : task.status === "working" || task.status === "waiting" ? task.assigned_agent : null;
+  return `${WORKFLOW_MARK[task.status]}${who ? ` ${who}` : ""}`;
+}
+
+/** `03-auth (Authentication): research ✓ · execute [api ✓ · ui ● e2] · verify ○`, as `PhaseProgress::line`. */
+export function workflowPhaseLine(steps: WorkflowInfo["steps"], phase: WorkflowPhase, tasks: readonly Task[]): string {
+  const find = (id: string | undefined) => (id ? tasks.find((t) => t.id === id) : undefined);
+  const parts = steps.map((step) => {
+    if (step.slice) {
+      const slices = (phase.slices ?? []).filter((s) => s.cards[step.id]);
+      if (!slices.length) return `${step.id} ⋯`;
+      return `${step.id} [${slices.map((s) => `${s.slice} ${workflowCard(find(s.cards[step.id]))}`).join(" · ")}]`;
+    }
+    const id = phase.cards[step.id];
+    return id ? `${step.id} ${workflowCard(find(id))}` : `${step.id} ⋯`;
+  });
+  const verdict = phase.verdict ? ` → ${phase.verdict}` : "";
+  return `${phase.phase} (${phase.title}): ${parts.join(" · ")}${verdict}`;
+}
+
+/** Every step laid out and every card done, as `PhaseProgress::done`. */
+function workflowPhaseDone(steps: WorkflowInfo["steps"], phase: WorkflowPhase, tasks: readonly Task[]): boolean {
+  const done = (id: string | undefined) => tasks.find((t) => t.id === id)?.status === "done";
+  return steps.every((step) => {
+    if (step.slice) {
+      const slices = (phase.slices ?? []).filter((s) => s.cards[step.id]);
+      return slices.length > 0 && slices.every((s) => done(s.cards[step.id]));
+    }
+    return !!phase.cards[step.id] && done(phase.cards[step.id]);
+  });
+}
+
+/** The strip's text: the phase the team is on with its place, as `WorkflowInfo::headline`. */
+export function workflowHeadline(workflow: WorkflowInfo, tasks: readonly Task[]): string {
+  const n = workflow.phases.length;
+  if (n === 0) return `${workflow.steps.map((s) => s.id).join(" → ")} · no phase laid out yet`;
+  const first = workflow.phases.findIndex((p) => !workflowPhaseDone(workflow.steps, p, tasks));
+  const at = first === -1 ? n - 1 : first;
+  const phase = workflow.phases[at];
+  const line = workflowPhaseLine(workflow.steps, phase, tasks);
+  return first === -1 ? `all ${n} done · last ${line}` : `phase ${at + 1}/${n} · ${line}`;
 }

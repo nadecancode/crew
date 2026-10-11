@@ -102,6 +102,20 @@ pub fn status(target: &Target, json: bool) -> Result<()> {
         .filter(|t| t.status == TaskStatus::Done)
         .count();
     println!("tasks      {done}/{} done", snapshot.tasks.len());
+    // The style's workflow: where each phase stands, read off its cards.
+    if let Some(workflow) = &s.workflow {
+        let lines = workflow.lines(&snapshot.tasks);
+        if lines.is_empty() {
+            println!(
+                "workflow   {} · no phase laid out yet",
+                workflow.step_ids().join(" → ")
+            );
+        }
+        for (i, line) in lines.iter().enumerate() {
+            let label = if i == 0 { "workflow" } else { "" };
+            println!("{label:<10} {line}");
+        }
+    }
     if s.completed_at.is_some() {
         match snapshot.questions.len() {
             0 => println!("state      all tasks done"),

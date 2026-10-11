@@ -50,14 +50,22 @@ pub fn render(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme, now: i64) 
         return;
     }
     // The usage strip takes its rows off the top, when there is something
-    // to show and room to show it.
-    let strip_h = super::usage::height(app, area);
-    if strip_h > 0 {
+    // to show and room to show it; the workflow strip comes under it.
+    let (usage_h, workflow_h) = strips(app, area);
+    if usage_h > 0 {
         let strip = Rect {
-            height: strip_h,
+            height: usage_h,
             ..area
         };
         super::usage::render(buf, strip, app, theme, now);
+    }
+    if workflow_h > 0 {
+        let strip = Rect {
+            y: area.y + usage_h,
+            height: workflow_h,
+            ..area
+        };
+        super::workflow::render(buf, strip, app, theme);
     }
     let (topo, bus, footer) = regions(app, area);
     if !topo.is_empty() {
@@ -90,8 +98,20 @@ pub enum Hit {
 
 /// The dashboard's regions inside `area`: (topology, message bus, footer),
 /// below the usage strip.
+/// The rows the usage strip and the workflow strip take off the top.
+fn strips(app: &App, area: Rect) -> (u16, u16) {
+    let usage_h = super::usage::height(app, area);
+    let below = Rect {
+        y: area.y + usage_h,
+        height: area.height.saturating_sub(usage_h),
+        ..area
+    };
+    (usage_h, super::workflow::height(app, below))
+}
+
 fn regions(app: &App, area: Rect) -> (Rect, Rect, Rect) {
-    let strip_h = super::usage::height(app, area);
+    let (usage_h, workflow_h) = strips(app, area);
+    let strip_h = usage_h + workflow_h;
     let warnings = super::warning_rows(app);
     let (mut topo, mut bus, mut footer) = split(Rect {
         y: area.y + strip_h,

@@ -188,6 +188,12 @@ impl TaskStore for SqliteStore {
     fn load_tasks(&self) -> Result<Vec<Task>> {
         load_docs(&self.conn(), "tasks")
     }
+
+    fn delete_task(&self, id: &str) -> Result<()> {
+        self.conn()
+            .execute("DELETE FROM tasks WHERE id = ?1", params![id])?;
+        Ok(())
+    }
 }
 
 /// A task write inside the caller's transaction. Does not lock or commit.

@@ -12,6 +12,7 @@ pub mod models;
 pub mod question;
 pub mod tasks;
 pub mod usage;
+pub mod workflow;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

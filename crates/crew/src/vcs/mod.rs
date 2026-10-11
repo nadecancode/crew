@@ -76,8 +76,21 @@ pub trait Vcs: Send + Sync {
     fn commit_all(&self, dir: &Path, agent: &str, message: &str) -> Result<CommitInfo>;
     fn diff(&self, dir: &Path, against: Option<&str>) -> Result<String>;
     fn status(&self, dir: &Path) -> Result<String>;
+    /// The text of `path` as commit `rev` holds it, in the workspace at
+    /// `dir`; `None` when the commit has no such file.
+    fn file_at(&self, dir: &Path, rev: &str, path: &str) -> Result<Option<String>>;
+    /// The paths commit `rev` changed, relative to the tree. Inside the
+    /// workspace. A merge commit lists nothing: what it brought in was
+    /// committed elsewhere.
+    fn files_of(&self, dir: &Path, rev: &str) -> Result<Vec<String>>;
     fn cherry_pick(&self, dir: &Path, agent: &str, rev: &str) -> Result<Picked>;
     fn merge(&self, dir: &Path, agent: &str, branch: &str) -> Result<GitOutcome>;
+    /// `merge` for taking the integration branch before a card: a
+    /// fast-forward where the backend has one, so a workspace that is
+    /// simply behind is not ahead of the branch afterwards.
+    fn sync(&self, dir: &Path, agent: &str, branch: &str) -> Result<GitOutcome> {
+        self.merge(dir, agent, branch)
+    }
 
     /// Inside the integration workspace; under the helper launcher. `on_step`
     /// is called with each step as soon as it is done.
@@ -165,12 +178,24 @@ impl Vcs for Git {
         git::status(dir)
     }
 
+    fn file_at(&self, dir: &Path, rev: &str, path: &str) -> Result<Option<String>> {
+        git::file_at(dir, rev, path)
+    }
+
+    fn files_of(&self, dir: &Path, rev: &str) -> Result<Vec<String>> {
+        git::files_of(dir, rev)
+    }
+
     fn cherry_pick(&self, dir: &Path, agent: &str, rev: &str) -> Result<Picked> {
         git::cherry_pick(dir, agent, rev)
     }
 
     fn merge(&self, dir: &Path, agent: &str, branch: &str) -> Result<GitOutcome> {
         git::merge(dir, agent, branch)
+    }
+
+    fn sync(&self, dir: &Path, agent: &str, branch: &str) -> Result<GitOutcome> {
+        git::merge_ff(dir, agent, branch)
     }
 
     fn merge_agents(

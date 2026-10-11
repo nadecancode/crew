@@ -394,6 +394,7 @@ pub fn snapshot(now: i64) -> Snapshot {
             objective: "Rewrite the checkout service while preserving API compatibility."
                 .to_string(),
             style: None,
+            workflow: None,
             quotas: Vec::new(),
             workspace: "/work/demo".to_string(),
             state_dir: "/work/demo/.crew".to_string(),

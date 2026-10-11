@@ -1285,6 +1285,71 @@ was rearranged by hand, check jj log",
         }
     }
 
+    fn file_at(&self, dir: &Path, rev: &str, path: &str) -> Result<Option<String>> {
+        let path = path.trim_start_matches("./");
+        if path.is_empty() || path.starts_with('/') || path.split('/').any(|p| p == "..") {
+            bail!("'{path}' is not a path inside the tree");
+        }
+        let who = who_at(dir);
+        let commit = self.resolve(dir, &who, rev, "unknown revision")?;
+        let revset = format!("commit_id({commit})");
+        // Listed first: `file show` of a path the commit lacks is an error
+        // whose wording is jj's to change.
+        let listed = self.out(
+            dir,
+            &who,
+            &[
+                "--ignore-working-copy",
+                "file",
+                "list",
+                "-r",
+                &revset,
+                "--",
+                path,
+            ],
+        )?;
+        if !listed.lines().any(|line| line.trim() == path) {
+            return Ok(None);
+        }
+        self.out(
+            dir,
+            &who,
+            &[
+                "--ignore-working-copy",
+                "file",
+                "show",
+                "-r",
+                &revset,
+                "--",
+                path,
+            ],
+        )
+        .map(Some)
+    }
+
+    fn files_of(&self, dir: &Path, rev: &str) -> Result<Vec<String>> {
+        let who = who_at(dir);
+        let commit = self.resolve(dir, &who, rev, "unknown revision")?;
+        let revset = format!("commit_id({commit})");
+        let listed = self.out(
+            dir,
+            &who,
+            &[
+                "--ignore-working-copy",
+                "diff",
+                "-r",
+                &revset,
+                "--name-only",
+            ],
+        )?;
+        Ok(listed
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect())
+    }
+
     fn status(&self, dir: &Path) -> Result<String> {
         let who = who_at(dir);
         let changes = self.out(dir, &who, &["diff", "--summary"])?;

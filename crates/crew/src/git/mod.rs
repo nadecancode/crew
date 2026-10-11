@@ -554,6 +554,20 @@ fn commit_info(dir: &Path, rev: &str) -> Result<CommitInfo> {
     })
 }
 
+/// The paths a commit changed; none for a merge commit.
+pub fn files_of(dir: &Path, rev: &str) -> Result<Vec<String>> {
+    validate_rev(rev)?;
+    require_root(dir)?;
+    let files = out(dir, &["show", "--format=", "--name-only", rev])
+        .map_err(|_| anyhow!("unknown revision '{rev}'"))?;
+    Ok(files
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 /// Stage everything in the worktree and commit it as `agent`.
 pub fn commit_all(dir: &Path, agent: &str, message: &str) -> Result<CommitInfo> {
     let message = message.trim();
@@ -632,6 +646,26 @@ pub fn diff(dir: &Path, against: Option<&str>) -> Result<String> {
             Ok(truncate_diff(format!("{status}\n\n{patch}")))
         }
     }
+}
+
+/// The text of `path` as commit `rev` holds it; `None` when the commit has
+/// no such file. The path is a literal, relative to the tree.
+pub fn file_at(dir: &Path, rev: &str, path: &str) -> Result<Option<String>> {
+    require_root(dir)?;
+    validate_rev(rev)?;
+    let path = path.trim_start_matches("./");
+    if path.is_empty() || path.starts_with('/') || path.split('/').any(|p| p == "..") {
+        bail!("'{path}' is not a path inside the tree");
+    }
+    let output = run(dir, &["show", &format!("{rev}:{path}")])?;
+    if output.status.success() {
+        return Ok(Some(text(&output.stdout)));
+    }
+    let why = text(&output.stderr);
+    if why.contains("does not exist in") || why.contains("exists on disk, but not in") {
+        return Ok(None);
+    }
+    bail!("git show {rev}:{path} failed: {}", why.trim());
 }
 
 pub fn status(dir: &Path) -> Result<String> {
@@ -788,8 +822,21 @@ pub fn cherry_pick(dir: &Path, agent: &str, commit: &str) -> Result<Picked> {
     })
 }
 
-/// Merge a branch (or commit) into this worktree's branch.
+/// Merge a branch (or commit) into this worktree's branch, as a merge
+/// commit always: the record of taking a teammate's work.
 pub fn merge(dir: &Path, agent: &str, rev: &str) -> Result<GitOutcome> {
+    merge_with(dir, agent, rev, false)
+}
+
+/// Merge a branch into this worktree's branch, fast-forwarding when the
+/// branch is simply behind: how a worktree takes the integration branch
+/// before a card, so that a member's branch is not ahead of it by a merge
+/// commit that says nothing.
+pub fn merge_ff(dir: &Path, agent: &str, rev: &str) -> Result<GitOutcome> {
+    merge_with(dir, agent, rev, true)
+}
+
+fn merge_with(dir: &Path, agent: &str, rev: &str, fast_forward: bool) -> Result<GitOutcome> {
     validate_rev(rev)?;
     require_root(dir)?;
     if dirty(dir)? {
@@ -803,9 +850,10 @@ pub fn merge(dir: &Path, agent: &str, rev: &str) -> Result<GitOutcome> {
     let mut cmd = git(dir);
     with_identity(&mut cmd, agent);
     let message = format!("Merge {rev}");
+    let ff = if fast_forward { "--ff" } else { "--no-ff" };
     let output = output_recovering(
         dir,
-        cmd.args(["merge", "--no-ff", "--no-edit", "-m", &message, rev]),
+        cmd.args(["merge", ff, "--no-edit", "-m", &message, rev]),
         "merge",
         &["merge", "--abort"],
     )?;

@@ -28,6 +28,9 @@ fn git_error(e: impl std::fmt::Display) -> RpcError {
     RpcError::new("git", e.to_string())
 }
 
+/// What `git_merge` takes as `from_agent` for the integration branch.
+pub(crate) const INTEGRATION_PEER: &str = "integration";
+
 /// One VCS operation: its events, emitted on the thread that runs it.
 ///
 /// `start` emits `started`; `finish` emits the terminal event. One that is
@@ -302,7 +305,7 @@ impl Daemon {
     /// Run a blocking sequence of git operations on `agent`'s behalf, one
     /// at a time per daemon, inside the agent's sandbox when the team
     /// requires one.
-    async fn agent_git<T: Send + 'static>(
+    pub(crate) async fn agent_git<T: Send + 'static>(
         &self,
         agent: &str,
         f: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
@@ -517,6 +520,22 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         agent: &str,
         from_agent: String,
     ) -> Result<GitOutcome, RpcError> {
+        self.merge_from(agent, from_agent, false).await
+    }
+
+    /// Take the integration branch into `agent`'s worktree before a card,
+    /// fast-forwarding where the backend can.
+    pub(crate) async fn sync_from_integration(&self, agent: &str) -> Result<GitOutcome, RpcError> {
+        self.merge_from(agent, INTEGRATION_PEER.to_string(), true)
+            .await
+    }
+
+    async fn merge_from(
+        &self,
+        agent: &str,
+        from_agent: String,
+        fast_forward: bool,
+    ) -> Result<GitOutcome, RpcError> {
         self.require_own_worktree("git_merge")?;
         if !is_valid_id(&from_agent) {
             return Err(RpcError::not_found(format!("no agent '{from_agent}'")));
@@ -533,12 +552,29 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
                 model.session.isolation == "worktree",
             )
         };
+        // `integration` (no member of that name): the integration branch,
+        // where a workflow team lands every completed card.
+        let integration = member.is_none() && from_agent == INTEGRATION_PEER;
         let branch = match member {
             Some(branch) => branch.ok_or_else(|| {
                 git_error(format!(
                     "{from_agent} has no branch (agents share the workspace)"
                 ))
             })?,
+            None if integration => {
+                let vcs = self.vcs();
+                let exists = worktrees
+                    && self
+                        .git(move || Ok(vcs.branch_exists(git::INTEGRATION_BRANCH)))
+                        .await?;
+                if !exists {
+                    return Err(RpcError::not_found(format!(
+                        "nothing has landed on {} yet",
+                        git::INTEGRATION_BRANCH
+                    )));
+                }
+                git::INTEGRATION_BRANCH.to_string()
+            }
             // A member who has left the team leaves its branch behind.
             None => {
                 let (vcs, branch) = (self.vcs(), git::branch_for(&from_agent));
@@ -557,12 +593,17 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
         let author = agent.to_string();
         let vcs = self.vcs();
         let mut op = VcsOp::new(self, VcsAction::Merge, agent)
-            .peer(Some(&from_agent))
+            .peer((!integration).then_some(from_agent.as_str()))
             .source(&branch)
             .branch(&git::branch_for(agent));
         self.agent_git(agent, move || {
             op.start();
-            match vcs.merge(&dir, &author, &branch) {
+            let merged = if fast_forward {
+                vcs.sync(&dir, &author, &branch)
+            } else {
+                vcs.merge(&dir, &author, &branch)
+            };
+            match merged {
                 Ok(outcome) => {
                     op.finish(VcsOutcome::Ok, |e| e.outcome = fill_outcome(e, &outcome));
                     Ok(outcome)
@@ -578,13 +619,8 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
 
     /// Merge every agent branch into the integration branch.
     pub(crate) async fn integrate(&self) -> Result<Value, RpcError> {
-        let (agents, base, worktrees, sandbox) = {
+        let agents = {
             let model = self.model();
-            let team = model
-                .session
-                .team
-                .as_ref()
-                .ok_or_else(|| RpcError::unavailable("no team is loaded"))?;
             let mut agents: Vec<String> = model
                 .agents
                 .iter()
@@ -600,8 +636,43 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
                     }
                 }
             }
+            agents
+        };
+        let (worktree, steps) = self.integrate_agents(agents).await?;
+        let mut merged = Vec::new();
+        let mut conflicts = Vec::new();
+        for step in &steps {
+            if step.outcome.ok {
+                merged.push(step.agent.clone());
+            } else if let Some(conflict) = &step.outcome.conflict {
+                conflicts.push(json!({ "agent": step.agent, "files": conflict.files }));
+            }
+        }
+        Ok(json!({
+            "branch": worktree.branch,
+            "path": worktree.path.to_string_lossy(),
+            "merged": merged,
+            "conflicts": conflicts,
+        }))
+    }
+
+    /// Merge the branches of `agents` that are ahead of the integration
+    /// branch into it, one at a time, on its own worktree (made when it is
+    /// not there yet) and through a helper sandbox when the team requires
+    /// one. A branch that conflicts is left out and reported, never forced;
+    /// each step is a version control event.
+    pub(crate) async fn integrate_agents(
+        &self,
+        agents: Vec<String>,
+    ) -> Result<(crate::vcs::Workspace, Vec<IntegrationStep>), RpcError> {
+        let (base, worktrees, sandbox) = {
+            let model = self.model();
+            let team = model
+                .session
+                .team
+                .as_ref()
+                .ok_or_else(|| RpcError::unavailable("no team is loaded"))?;
             (
-                agents,
                 team.workspace.base.clone(),
                 model.session.isolation == "worktree",
                 team.workspace.sandbox.clone(),
@@ -663,21 +734,7 @@ git in it (use a git repository as the workspace, or workspace.init: true)",
                 }
             })
             .await?;
-        let mut merged = Vec::new();
-        let mut conflicts = Vec::new();
-        for step in &steps {
-            if step.outcome.ok {
-                merged.push(step.agent.clone());
-            } else if let Some(conflict) = &step.outcome.conflict {
-                conflicts.push(json!({ "agent": step.agent, "files": conflict.files }));
-            }
-        }
-        Ok(json!({
-            "branch": worktree.branch,
-            "path": worktree.path.to_string_lossy(),
-            "merged": merged,
-            "conflicts": conflicts,
-        }))
+        Ok((worktree, steps))
     }
 }
 

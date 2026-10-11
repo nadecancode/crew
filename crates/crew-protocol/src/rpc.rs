@@ -328,6 +328,10 @@ pub struct SessionInfo {
     /// The work style the team was launched from, if any.
     #[serde(default)]
     pub style: Option<String>,
+    /// The style's workflow as laid on the board, when it has one: the
+    /// steps, and each unit run with its cards (see [`crate::workflow`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<crate::workflow::WorkflowInfo>,
     /// Usage windows of the accounts the team runs on, where known.
     #[serde(default)]
     pub quotas: Vec<Quota>,

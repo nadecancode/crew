@@ -314,9 +314,13 @@ conflicting files are reported.",
         ),
         tool(
             "git_merge",
-            "Merge a teammate's whole branch into yours. On conflict nothing is changed and the \
-conflicting files are reported.",
-            object(json!({ "from_agent": { "type": "string" } }), &["from_agent"]),
+            "Merge a teammate's whole branch into yours, or, with from_agent \"integration\", the \
+integration branch (agents/integration: where a workflow team lands every completed card). On \
+conflict nothing is changed and the conflicting files are reported.",
+            object(
+                json!({ "from_agent": { "type": "string", "description": "A teammate's id, or integration" } }),
+                &["from_agent"],
+            ),
             false,
         ),
         tool(
@@ -442,6 +446,66 @@ steps. Returns the cards.",
                 }),
                 &["phase", "title"],
             ),
+        ),
+        tool(
+            "workflow_slices",
+            "Declare a unit's slices once its plan says what they are: the parts of the unit \
+that can be done side by side (a slice with `depends` waits for those slices first; slices whose \
+`touches` overlap take turns). Each slice step of the workflow gets one card per slice (named \
+<step>-<phase>-<slice>, spread over the step's members in turn), and the steps after them are \
+laid out to wait for every slice. All or none. Declared again before any slice has started \
+(a review changed the split), the cards are replaced; once a slice has begun they stay. The \
+orchestrator may declare any unit's; a member the one its open card belongs to.",
+            object(
+                json!({
+                    "phase": { "type": "string", "description": "The unit, as given to workflow_run" },
+                    "slices": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string", "description": "Short id: lowercase letters, digits, - and _ (e.g. api)" },
+                                "title": { "type": "string" },
+                                "brief": { "type": "string", "description": "What this slice covers: its tasks from the plan, the files it owns, what it must not touch" },
+                                "depends": { "type": "array", "items": { "type": "string" }, "description": "Slices of this unit it waits for; left out, it runs beside the others" },
+                                "touches": { "type": "array", "items": { "type": "string" }, "description": "The files or directories this slice writes (workspace-relative). Two slices that touch the same path take turns (the later-declared one waits for the earlier); a slice that names none runs alone, after every earlier slice and before every later one. What a slice writes outside its touches is reported when its card is done" },
+                            },
+                            "required": ["id", "title"],
+                            "additionalProperties": false,
+                        },
+                    },
+                }),
+                &["phase", "slices"],
+            ),
+            false,
+        ),
+        tool(
+            "workflow_phases",
+            "Queue units of work for the workflow, in order (the phases of a roadmap). Under the \
+workflow's auto mode crew runs each when the one before lets it; otherwise the orchestrator runs \
+them with workflow_run. The orchestrator may queue; a member whose open card is the roadmap's may \
+too. Adds to what is queued.",
+            object(
+                json!({
+                    "phases": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string", "description": "Short id, as in 03-auth" },
+                                "title": { "type": "string" },
+                                "brief": { "type": "string", "description": "What every step of the unit needs to know" },
+                            },
+                            "required": ["id", "title"],
+                            "additionalProperties": false,
+                        },
+                    },
+                }),
+                &["phases"],
+            ),
+            false,
         ),
         orchestrator(
             "integrate",
@@ -1565,6 +1629,51 @@ done and you have been told so."
                     "{} cards laid out; the first starts when its owner is free:\n{}",
                     tasks.len(),
                     chain.join("\n")
+                ),
+                raw,
+            )
+        }
+        "workflow_slices" => {
+            let slices: Vec<crew_core::guardrails::SliceSpec> =
+                serde_json::from_value(args.get("slices").cloned().unwrap_or(Value::Null))
+                    .map_err(|e| format!("slices: {e}"))?;
+            let (tasks, raw): (Vec<Task>, _) = rpc(
+                client,
+                Call::WorkflowSlices {
+                    phase: arg_str(args, "phase")?,
+                    slices,
+                },
+            )?;
+            let chain: Vec<String> = tasks
+                .iter()
+                .map(|t| {
+                    format!(
+                        "{} [{}] {}",
+                        t.id,
+                        t.status,
+                        t.assigned_agent.as_deref().unwrap_or("-")
+                    )
+                })
+                .collect();
+            out(
+                format!(
+                    "{} cards laid out; the slices start as their owners are free:\n{}",
+                    tasks.len(),
+                    chain.join("\n")
+                ),
+                raw,
+            )
+        }
+        "workflow_phases" => {
+            let phases: Vec<crew_core::guardrails::PhaseSpec> =
+                serde_json::from_value(args.get("phases").cloned().unwrap_or(Value::Null))
+                    .map_err(|e| format!("phases: {e}"))?;
+            let (queued, raw): (Vec<String>, _) = rpc(client, Call::WorkflowPhases { phases })?;
+            out(
+                format!(
+                    "{} phase(s) queued, in order: {}",
+                    queued.len(),
+                    queued.join(" → ")
                 ),
                 raw,
             )

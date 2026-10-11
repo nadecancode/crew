@@ -303,7 +303,7 @@ mod tests {
         let gsd = styles.get("gsd").unwrap();
         assert_eq!(
             gsd.staffing(),
-            "researcher, planner, checker, executor, verifier + orchestrator"
+            "researcher, planner, checker, executor-1, executor-2, verifier + orchestrator"
         );
         let gsd = &gsd.style;
         assert_eq!(

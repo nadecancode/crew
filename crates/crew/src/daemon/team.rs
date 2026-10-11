@@ -167,6 +167,8 @@ impl Daemon {
                         .filter(|s| s.fallback)
                         .map(|s| s.note.clone())
                         .unwrap_or_default(),
+                    workflow_runs: Vec::new(),
+                    workflow_queue: Vec::new(),
                 },
                 ..Model::default()
             };

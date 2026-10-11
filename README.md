@@ -370,6 +370,13 @@ workflow:                   # the chain of cards one unit of work goes through
       reviewer: checker
       depends_on: [research]
       description: …
+    - id: execute
+      scope: slice            # one card per slice, side by side
+      agent: executor-1
+      agents: [executor-2]    # the slices take turns over these
+      depends_on: [plan]
+      produces: [".planning/phases/{phase}/slices/{slice}/SUMMARY.md"]
+      description: "Execute slice {slice} ({slice_title}): {slice_brief}"
 ```
 
 **Messaging.** `hub` makes the team hub-and-spoke: a member writes to the
@@ -419,6 +426,78 @@ board with `workflow_run(phase, title, brief)`: one card per step, named
 orchestrator's `crew_tools`, that is the only way work gets on the board. A
 run is all or none: an id already on the board stops it before any card is
 made.
+
+Three gates make the workflow hold rather than ask, each deterministic and
+declared in the workflow, so another workflow is another YAML:
+
+- **`produces`** — a card is done only when each listed file is in the
+  card's newest commit (in the workspace itself under `isolation: shared`);
+  `task_complete` is refused otherwise, naming what is missing.
+- **`verdict`** on a step — `{ file, key: status, pass: [...], redo: [...] }`:
+  when that card is done, the first `<key>: <value>` line of the file is
+  read and recorded on the run (shown as `→ passed` in the strip). With
+  **`order: sequential`**, `workflow_run` for a new unit is refused while the
+  last unit has an open card; after a `pass` value anything may follow; after
+  a `redo` value only a follow-up run of the same unit (an id starting with
+  `<phase>-`); after any other value the team cannot go on by itself — the
+  orchestrator settles it with the operator and `task_retry`s the verdict
+  card so the file is written and read again.
+- **Slices** — a step with `scope: slice` runs once per slice of the unit,
+  side by side: the orchestrator declares the slices with
+  `workflow_slices(phase, [{id, title, brief}])` once the step before them
+  (a plan) says what they are, the cards `<step>-<phase>-<slice>` are spread
+  over the step's `agent` and `agents` in turn, and a phase step that depends
+  on a slice step waits for every slice. A slice with `depends` waits for
+  those slices' cards of the same step; the rest run side by side. Each
+  slice says in `touches` which files or directories it writes: two slices
+  that touch the same path take turns (the later-declared one waits for the
+  earlier, as if it had named it in `depends`), and a slice that names
+  nothing may write anything, so it runs alone — after every slice declared
+  before it, before every one after. No two executors write the same files
+  side by side: gsd-pi's conflict filter, settled when the slices are
+  declared and visible on the cards. When a slice's card is done, the files
+  its commits changed are held against its `touches` (plus what the step
+  `produces`, and where): anything outside is reported as an event and to
+  the orchestrator — the split was wrong or the executor strayed — not
+  held, since the landing gate catches what actually conflicts. Phases stay
+  strictly sequential; within a phase the slices are as parallel as their
+  dependencies, their paths and the executors allow. A unit whose slices
+  are not declared counts as open. A member may declare the slices of the
+  unit its open card belongs to (the planner, when its plan is written), as
+  gsd-pi's planner records its own slices; declared again before any slice
+  has started (a review changed the split), the cards are taken off the
+  board and laid anew — once a slice has begun, they stay.
+- **Landing** — under worktree isolation, a team with a workflow lands every
+  completed card: when a card is completed its author's branch is merged
+  into the integration branch (`agents/integration`, the one `integrate`
+  builds), and that merge is a gate like the others — a conflict leaves the
+  card open, the author is told the files, takes the branch into its
+  worktree (`git_merge(from_agent: "integration")`), resolves and completes
+  again. When a card is handed out, the integration branch is merged into
+  its owner's worktree first, so a slice starts from the slices it depends
+  on, the verify step from every slice, and the next phase from the whole
+  phase before it, with nobody merging by hand. The base branch is never
+  touched: landing the integration branch on it stays the operator's call.
+  gsd-pi's parallel slice runner exists but is never called and never
+  merges; here the slices really run side by side on the executor pool, and
+  their work meets on the integration branch.
+- **`auto: true`** — crew is the loop, as gsd-pi's auto mode: units queued
+  with `workflow_phases([{id, title, brief}])` (by the orchestrator, or by
+  the member holding the roadmap card) run one after another as the
+  sequence lets them, a redo verdict gets a follow-up run (`<phase>-gaps`,
+  three at most), and the orchestrator hears of what the workflow cannot go
+  on from.
+- **`review_rounds: N`** — the N-th "changes requested" on a card of a run
+  blocks the card for the orchestrator instead of sending it back again; the
+  author is freed and the orchestrator is told its options (`task_retry` for
+  another round, `task_edit`, `task_fail`).
+
+Where the work stands is read off the cards and shown as it moves:
+a strip under the dashboard's usage bars and a row under the objective on
+the web dashboard say which phase the team is on and where each step of it
+stands (`phase 2/4 · 03-auth (Authentication): research ✓ · plan ◐ checker
+· execute ○ · verify ○`), and `crew status` lists every phase the same
+way.
 
 ## Model catalog
 

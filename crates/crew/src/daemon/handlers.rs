@@ -640,6 +640,14 @@ change identity",
                 self.privileged(&who)?;
                 reply(self.run_workflow(&phase, &title, &brief)?)
             }
+            Call::WorkflowSlices { phase, slices } => {
+                self.workflow_caller(&who, Some(&phase))?;
+                reply(self.declare_slices(&phase, slices)?)
+            }
+            Call::WorkflowPhases { phases } => {
+                self.workflow_caller(&who, None)?;
+                reply(self.queue_phases(phases)?)
+            }
 
             Call::ReviewRequest {
                 agent_id,

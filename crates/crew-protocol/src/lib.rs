@@ -13,5 +13,6 @@ pub mod rpc;
 pub mod types;
 pub mod usage_metrics;
 pub mod vcs;
+pub mod workflow;
 
 pub use types::*;

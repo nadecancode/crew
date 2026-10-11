@@ -13,7 +13,7 @@
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal, on, onCleanup, onMount, type JSX } from "solid-js";
 import { AppContext, pageTitle, useApp, workspaceName, type Page } from "../app";
 import { useSecond } from "../clock";
-import { clockTime, fmtElapsed, runtimeGlyph } from "../format";
+import { clockTime, fmtElapsed, runtimeGlyph, workflowHeadline } from "../format";
 import { AgentGraph } from "../graph/AgentGraph";
 import { TaskDag } from "../graph/TaskDag";
 import { handleKey, keyboardFree } from "../keys";
@@ -266,6 +266,7 @@ function WorkspaceSummary() {
   return <section class="workspace-summary" aria-label="workspace summary">
     <div class="objective-block"><details class="objective"><summary title="Expand objective"><h1>{s()?.objective || s()?.project || "Workspace"}</h1></summary></details>
       <p class="workspace-meta"><span title={s()?.workspace}>{homeDir(s()?.workspace ?? "")}</span> · {elapsed()} <span class="vcs" title={s()?.vcs_note || `agents work with ${s()?.vcs}`}>{s()?.vcs}</span><Show when={s()?.sandbox}> · {s()?.sandbox === "required" ? "sandbox" : s()?.sandbox === "off" ? "no sandbox" : "sandbox unconfirmed"}</Show></p>
+      <Show when={s()?.workflow}>{(workflow) => <p class="workflow" title="The style's workflow: the phase the team is on, and where each step stands"><span class="label">workflow</span> {workflowHeadline(workflow(), store.state.tasks)}</p>}</Show>
       <Show when={s()?.summary || s()?.completed_at != null}><details class="completion"><summary>Team completed <Show when={s()?.completed_at != null}>{clockTime(s()!.completed_at!)}</Show></summary><p>{s()?.summary}</p></details></Show>
     </div>
     <dl class="summary-counts"><For each={counts()}>{([value, label]) => <div><dd>{value}</dd><dt>{label}</dt></div>}</For></dl>

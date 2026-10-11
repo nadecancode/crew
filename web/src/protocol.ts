@@ -161,10 +161,17 @@ export type VcsEvent = {
 
 export type Quota = { runtime: RuntimeKind; window: string; percent_used: number; resets_at?: number | null; updated_at: number };
 
+/** One unit of work the style's workflow was laid out for: its cards, one per step. */
+export type WorkflowSlice = { slice: string; title: string; brief?: string; depends?: string[]; touches?: string[]; cards: Record<string, string> };
+export type WorkflowPhase = { phase: string; title: string; brief?: string; laid_at: number; cards: Record<string, string>; slices?: WorkflowSlice[]; verdict?: string | null; landed?: Record<string, string> };
+/** The style's workflow as laid on the board; where a phase stands is read off its cards. */
+export type WorkflowInfo = { steps: { id: string; slice?: boolean }[]; phases: WorkflowPhase[] };
+
 export type SessionInfo = {
   project?: string | null;
   objective: string;
   style?: string | null;
+  workflow?: WorkflowInfo | null;
   quotas: Quota[];
   workspace: string;
   state_dir: string;

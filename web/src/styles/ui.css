@@ -55,6 +55,8 @@ pre { margin: 0; white-space: pre-wrap; }
 .objective h1 { font: 600 var(--font-title)/1.3 var(--ui); margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--title-lines, 2); overflow: hidden; }
 .objective[open] h1 { display: block; max-height: 30vh; overflow: auto; }
 .workspace-meta { color: var(--muted); margin: 4px 0 0; font: 12px/1.5 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-summary .workflow { margin: 2px 0 0; font: 12px/1.5 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-summary .workflow .label { color: var(--muted); }
 .completion { font-size: 12px; }
 .completion p { }
 .summary-counts { display: flex; flex-wrap: wrap; gap: 16px; margin: 0; font-variant-numeric: tabular-nums; }

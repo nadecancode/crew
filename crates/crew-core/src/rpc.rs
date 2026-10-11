@@ -366,6 +366,17 @@ pub enum Call {
         #[serde(default)]
         brief: String,
     },
+    /// Orchestrator only: declare a unit's slices, laying its slice steps'
+    /// cards (one per slice, side by side) and the phase steps after them.
+    WorkflowSlices {
+        phase: String,
+        slices: Vec<crate::guardrails::SliceSpec>,
+    },
+    /// Queue units for the workflow, in order: under `auto`, crew runs
+    /// each when the one before lets it; otherwise `workflow_run` does.
+    WorkflowPhases {
+        phases: Vec<crate::guardrails::PhaseSpec>,
+    },
     TaskRetry {
         id: String,
     },
@@ -628,6 +639,8 @@ impl Call {
             Call::TaskFail { .. } => "task_fail",
             Call::TaskRetry { .. } => "task_retry",
             Call::WorkflowRun { .. } => "workflow_run",
+            Call::WorkflowSlices { .. } => "workflow_slices",
+            Call::WorkflowPhases { .. } => "workflow_phases",
             Call::ReviewRequest { .. } => "review_request",
             Call::ReviewSubmit { .. } => "review_submit",
             Call::SessionComplete { .. } => "session_complete",

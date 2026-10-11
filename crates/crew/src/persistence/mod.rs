@@ -87,6 +87,9 @@ pub trait TaskStore: Send + Sync {
     fn save_task(&self, task: &Task) -> Result<()>;
     /// Tasks in creation order.
     fn load_tasks(&self) -> Result<Vec<Task>>;
+    /// Take a card off the board for good (one never started: slices laid
+    /// out again). Nothing to delete is not an error.
+    fn delete_task(&self, id: &str) -> Result<()>;
 }
 
 pub trait EventStore: Send + Sync {

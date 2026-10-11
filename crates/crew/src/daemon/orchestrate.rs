@@ -393,7 +393,14 @@ until the database takes writes again, tasks wait where they are.",
         if !claimed {
             return Ok(());
         }
-        let body = prompt::task_dispatch(&task);
+        let mut body = prompt::task_dispatch(&task);
+        // A team that lands its cards: the owner's worktree takes the
+        // integration branch first, so the card starts from every card
+        // landed before it.
+        if let Some(note) = self.sync_card(agent_id).await {
+            body.push_str("\n\n");
+            body.push_str(&note);
+        }
         self.project_task(agent_id);
         self.model().rt(agent_id).self_status = None;
         self.model().rt(agent_id).parking_turn = false;
@@ -1011,6 +1018,14 @@ if no more work is needed, task_complete(task_id=\"{}\") can finish the parked c
             .filter(|a| !a.value.is_empty())
             .collect();
         let result = truncate_chars(result.trim(), MAX_RESULT_CHARS);
+        // A workflow card's gates: what the step produces must be in its
+        // commit, and its verdict readable, before it counts as done; and
+        // in a team that lands its cards, its work merged into the
+        // integration branch.
+        self.hold_workflow_gates(&task, &author, &artifacts).await?;
+        self.hold_landing(&task, &author, &artifacts).await?;
+        // A slice that wrote outside what it touches is reported, not held.
+        self.report_strays(&task, &author, &artifacts).await;
         // A configured review is never skipped. When its reviewer cannot do
         // it, the task waits in Review and the orchestrator decides.
         // `ask_reviewer`: the reviewer gets the review request.
@@ -1118,6 +1133,7 @@ yourself"
             self.clear_after_card(&author, &updated.id).await;
         }
         self.replan();
+        self.auto_advance();
         Ok(updated)
     }
 
@@ -1396,6 +1412,20 @@ with review_submit(task_id=\"{}\", approve=true|false).",
             && author
                 .as_deref()
                 .is_some_and(|a| tasks::executing_task(&self.model().tasks, a).is_some());
+        // A workflow bounds how often a card goes back to its author: at
+        // the limit, the card is blocked for the orchestrator to decide.
+        let escalate = if approve {
+            None
+        } else {
+            self.review_rounds_exhausted(&task, &reviewer)
+        };
+        let comments_told = match escalate {
+            Some((round, limit)) => format!(
+                "{comments}\n\n(Round {round} of {limit}: the card now waits for the \
+orchestrator's decision. Do not rework it unless it comes back to you.)"
+            ),
+            None => comments.clone(),
+        };
         // The verdict, made to the task as it is when it is stored (a card
         // edit or a progress report meanwhile is kept), if it is still
         // awaiting review.
@@ -1425,6 +1455,16 @@ with review_submit(task_id=\"{}\", approve=true|false).",
                 t.status = TaskStatus::Done;
                 t.completed_at = Some(now);
                 t.note = None;
+            } else if let Some((round, limit)) = escalate {
+                // Blocked without a start: it occupies nobody until the
+                // orchestrator sends it back (task_retry) or changes it.
+                t.status = TaskStatus::Blocked;
+                t.started_at = None;
+                t.progress = None;
+                t.note = Some(format!(
+                    "changes requested {round} times (workflow.review_rounds: {limit}); the \
+orchestrator decides"
+                ));
             } else {
                 t.status = if queued {
                     TaskStatus::Ready
@@ -1443,7 +1483,7 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         let updated = match author.as_deref().filter(|a| *a != reviewer) {
             Some(author) => {
                 let message =
-                    self.review_result(&task, &reviewer, author, approve, &comments, queued);
+                    self.review_result(&task, &reviewer, author, approve, &comments_told, queued);
                 let mut refused = None;
                 let stored = self.recipients_of(&message).and_then(|(recipients, p2p)| {
                     let apply = |model: &super::Model, t: &mut Task| {
@@ -1498,12 +1538,43 @@ with review_submit(task_id=\"{}\", approve=true|false).",
             .task(task_id)
             .agent(&reviewer),
         );
+        if let Some((round, limit)) = escalate {
+            self.emit(
+                NewEvent::new(
+                    "scheduler",
+                    "task.review_rounds",
+                    format!(
+                        "task {task_id}: changes requested {round} times (workflow.review_rounds: \
+{limit}); blocked for the orchestrator"
+                    ),
+                )
+                .task(task_id)
+                .warn(),
+            );
+            self.notify_orchestrator(&format!(
+                "{reviewer} requested changes on {task_id} for the {round}{} time, the most this \
+workflow allows (review_rounds: {limit}). The card is blocked for your decision: task_retry \
+sends it back to {} for another round, task_edit revises it first, task_fail drops it.",
+                match round {
+                    1 => "st",
+                    2 => "nd",
+                    3 => "rd",
+                    _ => "th",
+                },
+                author.as_deref().unwrap_or("its author")
+            ))
+            .await;
+        }
         if let Some(author) = &author {
             if approve {
                 self.finish_task(&updated, author).await;
                 if tasks::executing_task(&self.model().tasks, author).is_none() {
                     self.settle(author);
                 }
+            } else if escalate.is_some() {
+                // The author is free of it until the orchestrator decides.
+                self.project_task(author);
+                self.settle(author);
             } else if !queued {
                 self.model().rt(author).self_status = None;
                 self.model().rt(author).parking_turn = false;
@@ -1515,6 +1586,7 @@ with review_submit(task_id=\"{}\", approve=true|false).",
             }
         }
         self.replan();
+        self.auto_advance();
         Ok(updated)
     }
 

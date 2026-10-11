@@ -23,7 +23,9 @@ instructions: |
     through the cards it gives you; never change them on your own.
   - Scope: do only what the card says. Something broken that you did not cause,
     or an improvement you see, goes in `.planning/phases/<phase>/deferred-items.md`
-    as one line, not into your change.
+    as one line, not into your change (an executor: in its slice's directory,
+    `.planning/phases/<phase>/slices/<slice>/deferred-items.md`, so slices
+    never write one file side by side).
   - Report to the orchestrator only; crew refuses the rest. A question it can
     answer, or a decision that is not yours (an architecture change, a
     dependency to add, anything irreversible): ask it, then carry on with what
@@ -47,7 +49,7 @@ instructions: |
   phase goal: every requirement covered, every task verifiable, every file
   real. Otherwise request changes naming the gaps; three rounds at most.
 
-  Execute (SUMMARY.md): the tasks in order, one commit per task, its message
+  Execute (one slice, its SUMMARY.md): the slice's tasks in order, one commit per task, its message
   `<type>(<phase>-<task>): <what>`; stage the task's files, never everything.
   Fix a bug your own change caused, or add a piece the task cannot do without,
   and say so in the summary as a deviation; for anything else, ask. After three
@@ -64,9 +66,18 @@ instructions: |
   - The first card, the roadmap, is on the board already: PROJECT.md,
     REQUIREMENTS.md, ROADMAP.md with numbered phases, STATE.md. When it is
     done, read its result and run the workflow for the first phase
-    (workflow_run), then for each next phase once the one before has passed.
-    A phase whose verification found gaps gets a run of its own, named for
-    them (`03-gaps`), whose brief lists the gaps.
+    (workflow_run) if crew has not: the workflow runs itself (auto). The
+    planner queues the roadmap's phases, crew runs each once the one before
+    passed, the planner declares each phase's slices, the executors take
+    them side by side, the verify card follows once every slice is done, and
+    a `gaps_found` verdict gets a follow-up run (`03-auth-gaps`, three at
+    most). You decide what the workflow cannot: a `human_needed` verdict
+    (operator_ask, then task_retry of the verify card so the outcome is
+    recorded), a plan sent back three times, questions, and anything the
+    team is stuck on.
+  - A card is done only with what its step produces in its commit; a plan
+    goes back to the planner at most three times, then the card is yours
+    to decide on (task_retry for another round, task_edit, or task_fail).
   - You route; you do not build, research or verify. Members write to you
     only: carry what one needs from another with task_edit or a message.
   - When every phase has passed, session_complete.
@@ -89,17 +100,22 @@ agents:
     tools: [read, web]
     crew_tools: [messaging, git]
   - id: planner
-    role: Planner. Writes the project roadmap, and turns each phase's research into PLAN.md.
+    role: Planner. Writes the project roadmap and queues its phases; turns each phase's research into PLAN.md and declares its slices.
     model: fable
     tools: [read, write]
-    crew_tools: [messaging, git]
+    crew_tools: [messaging, git, workflow_phases, workflow_slices]
   - id: checker
     role: Plan checker. Reviews the roadmap and every plan; approves only what a fresh executor could carry out.
     model: gpt-6-astra
     tools: [read, shell]
     crew_tools: [messaging, review]
-  - id: executor
-    role: Executor. Carries a plan out, one commit per task, and writes SUMMARY.md.
+  - id: executor-1
+    role: Executor. Carries one slice of a plan out, one commit per task, and writes its SUMMARY.md.
+    model: opus
+    tools: [read, write, shell]
+    crew_tools: [messaging, git, spawn]
+  - id: executor-2
+    role: Executor. Carries one slice of a plan out, one commit per task, and writes its SUMMARY.md.
     model: opus
     tools: [read, write, shell]
     crew_tools: [messaging, git, spawn]
@@ -119,9 +135,17 @@ tasks:
       requirements, each testable), `.planning/ROADMAP.md` (numbered phases,
       two to six, each with a goal, the requirements it covers and what it
       depends on) and `.planning/STATE.md` (the position: no phase started).
-      Read the codebase first where there is one. Commit, and list the phases
-      in your result, one line each: `<nn>-<slug>: <goal>`.
+      Read the codebase first where there is one. Commit, then queue the
+      phases with workflow_phases (id `<nn>-<slug>`, title, brief: the goal
+      and the requirements it covers), and list them in your result.
 workflow:
+  # One phase at a time, and only once the last one's verdict lets it:
+  # `passed` opens the next phase; `gaps_found` allows only a follow-up run
+  # of the same phase (an id starting with "<phase>-"); anything else waits
+  # for the operator. A plan goes back to the planner at most three times.
+  order: sequential
+  review_rounds: 3
+  auto: true
   steps:
     - id: research
       agent: researcher
@@ -147,29 +171,53 @@ workflow:
         Read the project files, this phase's ROADMAP entry and RESEARCH.md
         (the research card's commit). Write .planning/phases/{phase}/PLAN.md
         as the style says, and commit it. The checker reviews it: answer
-        requested changes by revising the plan.
+        requested changes by revising the plan. Group the plan's tasks into
+        slices that can be done side by side (disjoint files; a slice that
+        needs another's work names it in depends), then declare them with
+        workflow_slices(phase, slices): one entry per slice, its brief naming
+        its tasks, touches the files and directories it writes (crew makes
+        slices that touch the same paths take turns, and a slice that names
+        none run alone, so name them), depends the slices it needs first.
+        Declare them before you complete the plan card; they start only once
+        the checker has approved the plan. If the checker's changes alter
+        the split, declare them again: they are replaced as long as no
+        slice has started.
     - id: execute
-      agent: executor
+      scope: slice
+      agent: executor-1
+      agents: [executor-2]
       depends_on: [plan]
-      produces: [".planning/phases/{phase}/SUMMARY.md"]
+      produces: [".planning/phases/{phase}/slices/{slice}/SUMMARY.md"]
       description: |
-        Execute phase {phase} ({title}).
+        Execute slice {slice} ({slice_title}) of phase {phase} ({title}).
 
-        {brief}
+        {slice_brief}
+
+        Phase brief: {brief}
 
         Read PLAN.md (the plan card's commit), PROJECT.md and STATE.md. Carry
-        the plan out as the style says: one commit per task, then
-        .planning/phases/{phase}/SUMMARY.md, committed.
+        this slice's tasks out as the style says, and no other slice's: one
+        commit per task, then .planning/phases/{phase}/slices/{slice}/SUMMARY.md,
+        committed. Your worktree starts from agents/integration, where every
+        completed card landed (the slices yours depends on included); other
+        slices run beside you in their own worktrees, and your work lands
+        when you complete. Stay in the paths your slice touches.
     - id: verify
       agent: verifier
       depends_on: [execute]
       produces: [".planning/phases/{phase}/VERIFICATION.md"]
+      verdict:
+        file: ".planning/phases/{phase}/VERIFICATION.md"
+        key: status
+        pass: [passed]
+        redo: [gaps_found]
       description: |
         Verify phase {phase} ({title}).
 
         {brief}
 
-        Read the ROADMAP entry, PLAN.md and SUMMARY.md (the execute card's
-        commits), then check the code goal-backward as the style says. Write
+        Read the ROADMAP entry, PLAN.md and every slice's SUMMARY.md under
+        .planning/phases/{phase}/slices/ (the execute cards' commits), then
+        check the code goal-backward as the style says. Write
         .planning/phases/{phase}/VERIFICATION.md with its status, commit it,
         and start your result with the status line.
