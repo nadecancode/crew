@@ -34,6 +34,13 @@ impl Daemon {
     pub(crate) fn roster(&self) -> Option<TeamConfig> {
         let model = self.model();
         let mut team = model.session.team.clone()?;
+        // Pools are templates, not members: they stay as declared.
+        let pools: Vec<_> = team
+            .agents
+            .iter()
+            .filter(|a| a.pool.is_some())
+            .cloned()
+            .collect();
         team.agents = model
             .agents
             .iter()
@@ -62,6 +69,7 @@ impl Daemon {
                 spec.task = None;
                 spec
             })
+            .chain(pools)
             .collect();
         team.tasks = Vec::new();
         Some(team)
@@ -216,7 +224,12 @@ impl Daemon {
     pub(crate) fn leaving_note(&self, id: &str) -> String {
         let model = self.model();
         let temporary = model.agent(id).is_some_and(|a| a.temporary);
-        if !temporary || work_of(&model.tasks, id).0 {
+        // A pool's member comes and goes with its slices: crew's to retire,
+        // not the orchestrator's to keep busy.
+        if !temporary
+            || work_of(&model.tasks, id).0
+            || super::pools::pool_of_in(&model, id).is_some()
+        {
             return String::new();
         }
         format!(
@@ -255,6 +268,8 @@ unless you give it more work now."
                 .agents
                 .iter()
                 .filter(|a| a.temporary && !a.paused && a.status != AgentStatus::Spawning)
+                // A pool's members are retired by the plan, with their slices.
+                .filter(|a| super::pools::pool_of_in(&model, &a.id).is_none())
                 .filter(|a| !model.rt.get(&a.id).is_some_and(|rt| rt.turn_active))
                 // Its subagents still report to it.
                 .filter(|a| {
@@ -301,7 +316,7 @@ const SETTLE_MS: i64 = 5_000;
 /// Where a member stands with its work: whether a task it is on, or is to
 /// review, is still open; and when the last of its finished ones ended
 /// (`None`: it has had none).
-fn work_of(tasks: &[Task], id: &str) -> (bool, Option<i64>) {
+pub(crate) fn work_of(tasks: &[Task], id: &str) -> (bool, Option<i64>) {
     let mut open = false;
     let mut ended = None;
     for task in tasks

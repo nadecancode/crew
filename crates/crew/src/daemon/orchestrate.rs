@@ -97,7 +97,9 @@ impl Daemon {
         let procs = self.procs().ok();
         let homeward = self.homeward();
         self.resume_parked_tasks(procs.as_deref(), &homeward).await;
-        let (tasks, agents) = {
+        // A member of the pool for every slice that can start.
+        self.staff_pools().await;
+        let (tasks, agents, pools) = {
             let model = self.model();
             if model.session.team.is_none() {
                 return;
@@ -108,6 +110,7 @@ impl Daemon {
                 .map(|a| AgentView {
                     id: a.id.clone(),
                     orchestrator: a.orchestrator,
+                    pool: super::pools::pool_of_in(&model, &a.id),
                     // Its process must be running or starting: a retired
                     // subagent, or a member not restarted after a daemon
                     // restart, would never receive a task.
@@ -131,7 +134,11 @@ impl Daemon {
                     waiting_hold: a.limit.is_some() || a.status == AgentStatus::Blocked,
                 })
                 .collect();
-            (model.tasks.clone(), agents)
+            (
+                model.tasks.clone(),
+                agents,
+                super::pools::pool_cards_in(&model),
+            )
         };
         // A message still on its way to an agent also counts as activity.
         let agents: Vec<AgentView> = agents
@@ -147,7 +154,7 @@ impl Daemon {
                 a
             })
             .collect();
-        let actions = scheduler::plan(&tasks, &agents);
+        let actions = scheduler::plan_with(&tasks, &agents, &pools);
         let mut stalled = false;
         // Each action builds on the ones before it, so a write the database
         // refuses ends this round: the next one (an event, or the 5 s tick)
@@ -286,6 +293,8 @@ call session_complete with the final report."
         if !stalled {
             self.model().stall = None;
         }
+        // A pool's members whose slices are done leave.
+        self.retire_pool_members().await;
     }
 
     /// A write the plan needed was refused. Said once (in the log and to the

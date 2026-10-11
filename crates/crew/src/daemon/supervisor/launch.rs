@@ -124,7 +124,18 @@ impl Daemon {
                 .get(id)
                 .is_some_and(|l| l.session_confirmed));
         self.fall_back_by_style(id, None, Some(fresh)).await;
-        let (mut agent, mut local, team, agents, tasks, token, worktrees, cut_tools, cut_crew) = {
+        let (
+            mut agent,
+            mut local,
+            team,
+            agents,
+            tasks,
+            token,
+            worktrees,
+            cut_tools,
+            cut_crew,
+            pools,
+        ) = {
             let model = self.model();
             let agent = model
                 .agent(id)
@@ -155,6 +166,18 @@ impl Daemon {
                     cut_crew.push((member.id.clone(), selection));
                 }
             }
+            // The pools, templates rather than members, with their cuts.
+            let mut pools: Vec<(String, String, u32)> = Vec::new();
+            for template in team.agents.iter().filter(|a| a.pool.is_some()) {
+                pools.push((
+                    template.id.clone(),
+                    template.role.clone(),
+                    template.pool.unwrap_or(0),
+                ));
+                if let Some(classes) = &template.tools {
+                    cut_tools.push((template.id.clone(), classes.clone()));
+                }
+            }
             (
                 agent,
                 model.local.get(id).cloned().unwrap_or_default(),
@@ -165,6 +188,7 @@ impl Daemon {
                 model.session.isolation == "worktree",
                 cut_tools,
                 cut_crew,
+                pools,
             )
         };
         if start == Start::Fresh {
@@ -229,6 +253,7 @@ impl Daemon {
                 workflow: team.workflow.as_ref(),
                 tools: &cut_tools,
                 crew_tools: &cut_crew,
+                pools: &pools,
             },
         };
         let briefing = if agent.orchestrator {

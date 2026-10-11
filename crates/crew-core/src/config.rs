@@ -633,6 +633,50 @@ pub struct AgentSpec {
     /// Override the team's `defaults.context` for this member.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<ContextPolicy>,
+    /// A pool: not a member itself but the template for up to this many,
+    /// which crew makes as a workflow's slices can start (`<id>-1`,
+    /// `<id>-2`, …, one per slice that has no member free) and retires
+    /// when their slice is done. Named by a slice step's `agent` and by
+    /// nothing else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<u32>,
+}
+
+/// The number of `id` as a member of pool `pool` (`<pool>-<n>`, n ≥ 1).
+pub fn pool_member_number(pool: &str, id: &str) -> Option<u32> {
+    id.strip_prefix(pool)?
+        .strip_prefix('-')?
+        .parse()
+        .ok()
+        .filter(|n| *n >= 1)
+}
+
+impl AgentSpec {
+    /// The spec a member of this pool is made from: this one, with the
+    /// member's name and no pool of its own.
+    pub fn pool_member(&self, n: u32) -> AgentSpec {
+        AgentSpec {
+            id: format!("{}-{n}", self.id),
+            pool: None,
+            task: None,
+            ..self.clone()
+        }
+    }
+}
+
+impl TeamConfig {
+    /// Whether `id` names a pool of this team.
+    pub fn is_pool(&self, id: &str) -> bool {
+        self.agents.iter().any(|a| a.id == id && a.pool.is_some())
+    }
+
+    /// The pool `id` is a member of (`<pool>-<n>`), if any.
+    pub fn pool_of(&self, id: &str) -> Option<&AgentSpec> {
+        self.agents
+            .iter()
+            .filter(|a| a.pool.is_some())
+            .find(|a| pool_member_number(&a.id, id).is_some())
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -954,6 +998,21 @@ impl TeamConfig {
                 );
             }
         }
+        // A pool's members are named <pool>-<n> by crew: nobody else is.
+        for pool in self.agents.iter().filter(|a| a.pool.is_some()) {
+            if let Some(member) = self
+                .agents
+                .iter()
+                .find(|a| pool_member_number(&pool.id, &a.id).is_some())
+            {
+                bail!(
+                    "agent '{}' is named like a member of pool '{}' (<id>-<n>), which crew makes \
+itself",
+                    member.id,
+                    pool.id
+                );
+            }
+        }
         if self.orchestrator.agent
             && self.orchestrator.runtime.unwrap_or(self.defaults.runtime) == RuntimeKind::Shell
             && self.orchestrator.command.is_empty()
@@ -996,6 +1055,13 @@ impl TeamConfig {
             for who in [&task.agent, &task.reviewer].into_iter().flatten() {
                 if !ids.contains(who.as_str()) && who != ORCHESTRATOR_ID {
                     bail!("task '{}' references unknown agent '{who}'", task.id);
+                }
+                if self.is_pool(who) {
+                    bail!(
+                        "task '{}' names pool '{who}', whose members take a workflow's slices \
+and nothing else",
+                        task.id
+                    );
                 }
             }
         }
@@ -1135,6 +1201,25 @@ pub fn validate_agent_spec(agent: &AgentSpec) -> Result<()> {
     }
     if agent.role.len() > 200 {
         bail!("agent '{}': role is too long", agent.id);
+    }
+    if let Some(n) = agent.pool {
+        if n == 0 || n as usize > MAX_AGENTS {
+            bail!("agent '{}': pool is 1 to {MAX_AGENTS}", agent.id);
+        }
+        if agent.id.len() > 29 {
+            bail!(
+                "agent '{}': a pool's id has at most 29 characters, since its members are named \
+<id>-<n>",
+                agent.id
+            );
+        }
+        if agent.task.is_some() {
+            bail!(
+                "agent '{}' is a pool: it takes no task of its own; its members take a workflow's \
+slices",
+                agent.id
+            );
+        }
     }
     if agent.name.as_deref().is_some_and(|name| {
         name.trim().is_empty() || name.len() > 200 || name.chars().any(char::is_control)

@@ -252,7 +252,15 @@ them",
                 true,
             ));
         }
-        specs.extend(config.agents.iter().cloned().map(|a| (a, false)));
+        // A pool is a template: its members are made as the slices need them.
+        specs.extend(
+            config
+                .agents
+                .iter()
+                .filter(|a| a.pool.is_none())
+                .cloned()
+                .map(|a| (a, false)),
+        );
         let daemon = self.clone();
         let team = config.clone();
         let backend_name = backend.to_string();

@@ -31,6 +31,9 @@ pub struct AgentView {
     /// About to go back to its own model from a fallback, between tasks: it
     /// is handed no new task until it is back.
     pub homeward: bool,
+    /// The pool this member was made from (`<pool>-<n>`): it takes that
+    /// pool's cards and no other, and nobody else takes those.
+    pub pool: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,6 +55,17 @@ pub enum Action {
 }
 
 pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
+    plan_with(tasks, agents, &HashMap::new())
+}
+
+/// `plan`, with the cards that belong to a pool (card id → pool): such a
+/// card goes only to a member of its pool, and a pool's members take only
+/// such cards.
+pub fn plan_with(
+    tasks: &[Task],
+    agents: &[AgentView],
+    pools: &HashMap<String, String>,
+) -> Vec<Action> {
     let mut actions = Vec::new();
     if tasks.is_empty() {
         return actions;
@@ -141,11 +155,15 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
             None => {
                 // Never the task's own reviewer: nobody reviews their own work.
                 let reviewer = task.reviewer.as_deref();
+                let pool = pools.get(&task.id).map(String::as_str);
                 let candidate = agents
                     .iter()
                     .filter(|a| takes_work.contains(a.id.as_str()) && !a.orchestrator)
                     .filter(|a| !busy.contains(&a.id))
                     .filter(|a| reviewer != Some(a.id.as_str()))
+                    // A pool's card to one of its members; its members to
+                    // nothing else.
+                    .filter(|a| a.pool.as_deref() == pool)
                     .min_by_key(|a| (load.get(&a.id).copied().unwrap_or(0), a.id.clone()));
                 let Some(candidate) = candidate else { continue };
                 actions.push(Action::Assign {
@@ -214,9 +232,13 @@ pub fn plan(tasks: &[Task], agents: &[AgentView]) -> Vec<Action> {
                             };
                             reasons.push(format!("'{}' is ready but {why}", task.id))
                         }
-                        None => {
-                            reasons.push(format!("'{}' is ready but no worker is free", task.id))
-                        }
+                        None => reasons.push(match pools.get(&task.id) {
+                            Some(pool) => format!(
+                                "'{}' is ready but no member of pool {pool} is free",
+                                task.id
+                            ),
+                            None => format!("'{}' is ready but no worker is free", task.id),
+                        }),
                     }
                 }
                 TaskStatus::Waiting => {
@@ -296,6 +318,7 @@ mod tests {
                 parking_turn: false,
                 waiting_hold: false,
                 homeward: false,
+                pool: None,
             })
             .collect()
     }
@@ -305,6 +328,45 @@ mod tests {
             task: task.into(),
             agent: agent.into(),
         }
+    }
+
+    #[test]
+    fn a_pools_cards_go_to_its_members_and_its_members_take_nothing_else() {
+        let tasks = vec![
+            task("plain", None, &[], TaskStatus::Ready),
+            task("execute-p1-api", None, &[], TaskStatus::Ready),
+            task("execute-p1-ui", None, &[], TaskStatus::Ready),
+        ];
+        let mut views = agents(&["planner", "executor-1"]);
+        views[1].pool = Some("executor".into());
+        let pools: HashMap<String, String> = [
+            ("execute-p1-api".to_string(), "executor".to_string()),
+            ("execute-p1-ui".to_string(), "executor".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let actions = plan_with(&tasks, &views, &pools);
+        // The plain card to the planner, never to the pool's member; one
+        // pool card to executor-1, the other waits for another member.
+        assert!(actions.contains(&Action::Assign {
+            task: "plain".into(),
+            agent: "planner".into()
+        }));
+        assert!(actions.contains(&Action::Assign {
+            task: "execute-p1-api".into(),
+            agent: "executor-1".into()
+        }));
+        assert!(!actions
+            .iter()
+            .any(|a| matches!(a, Action::Assign { task, .. } if task == "execute-p1-ui")));
+        // With nobody of the pool free, the pool card is what is stuck.
+        let views = agents(&["planner"]);
+        let tasks = vec![task("execute-p1-api", None, &[], TaskStatus::Ready)];
+        let actions = plan_with(&tasks, &views, &pools);
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Stall { reason, .. } if reason.contains("no member of pool executor is free")
+        )));
     }
 
     fn ready(task: &str) -> Action {

@@ -42,6 +42,9 @@ pub struct Rules<'a> {
     pub tools: &'a [(String, Vec<ToolClass>)],
     /// Members whose crew tools the style cut down, with their selection.
     pub crew_tools: &'a [(String, Vec<String>)],
+    /// The team's pools: `(id, role, size)`. Not members, but the templates
+    /// crew makes a member from for each slice that can start.
+    pub pools: &'a [(String, String, u32)],
 }
 
 impl Rules<'_> {
@@ -243,6 +246,25 @@ fn roster(view: &TeamView<'_>, me: &str) -> String {
             None => String::new(),
         };
         let _ = writeln!(out, "- {}{you}{temporary} — {role}{tools}", agent.id);
+    }
+    for (id, role, size) in view.rules.pools {
+        let tools = match view.rules.tools_of(id) {
+            Some([]) => " · tools: none".to_string(),
+            Some(classes) => format!(
+                " · tools: {}",
+                classes
+                    .iter()
+                    .map(|c| c.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            None => String::new(),
+        };
+        let _ = writeln!(
+            out,
+            "- {id} — a pool: {role} Up to {size} at a time, made as slices can start ({id}-1, \
+{id}-2, …) and gone when their slice is done{tools}"
+        );
     }
     out
 }
@@ -1416,6 +1438,7 @@ mod tests {
                 workflow: Some(&workflow),
                 tools: &tools,
                 crew_tools: &crew_tools,
+                pools: &[],
             },
         };
         let member = worker_briefing(&view, &agents[1]);

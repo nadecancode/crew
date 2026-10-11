@@ -522,6 +522,30 @@ impl Workflow {
                         step.id
                     );
                 }
+                // A pool is a slice step's whole crew, and nothing else's.
+                if agents.iter().any(|a| a.id == who && a.pool.is_some()) {
+                    if field == "reviewer" {
+                        bail!(
+                            "workflow step '{}'.reviewer names pool '{who}'; a pool's members do \
+slices, they do not review",
+                            step.id
+                        );
+                    }
+                    if step.scope != Scope::Slice {
+                        bail!(
+                            "workflow step '{}' names pool '{who}', whose members take slices: \
+make it a slice step (scope: slice) or name a member",
+                            step.id
+                        );
+                    }
+                    if step.agent.as_deref() != Some(who) || !step.agents.is_empty() {
+                        bail!(
+                            "workflow step '{}': pool '{who}' is a slice step's whole crew; name \
+it as `agent` and nothing under `agents`",
+                            step.id
+                        );
+                    }
+                }
             }
             if step
                 .reviewer
@@ -1045,6 +1069,36 @@ mod tests {
             description: format!("do {id} for {{phase}}: {{brief}}"),
             ..Step::default()
         }
+    }
+
+    #[test]
+    fn a_pool_is_a_slice_steps_whole_crew_and_nothing_else() {
+        let mut team = agents(&["planner", "checker", "executor"]);
+        team[2].pool = Some(4);
+        let workflow = Workflow {
+            steps: vec![
+                step("plan", "planner", &[]),
+                Step {
+                    scope: Scope::Slice,
+                    ..step("execute", "executor", &["plan"])
+                },
+            ],
+            ..Workflow::default()
+        };
+        workflow.validate(&team).unwrap();
+        let bad = |mutate: &dyn Fn(&mut Workflow)| {
+            let mut w = workflow.clone();
+            mutate(&mut w);
+            w.validate(&team).unwrap_err().to_string()
+        };
+        assert!(bad(&|w| w.steps[1].scope = Scope::Phase).contains("make it a slice step"));
+        assert!(bad(&|w| w.steps[1].agents = vec!["planner".into()]).contains("whole crew"));
+        assert!(bad(&|w| {
+            w.steps[1].agent = Some("planner".into());
+            w.steps[1].agents = vec!["executor".into()];
+        })
+        .contains("whole crew"));
+        assert!(bad(&|w| w.steps[0].reviewer = Some("executor".into())).contains("do not review"));
     }
 
     #[test]

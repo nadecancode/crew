@@ -310,9 +310,21 @@ started: slices are laid out again only before any of them begins",
             }
             (run, p.title.clone(), p.brief.clone(), old)
         };
-        let specs = workflow
+        let mut specs = workflow
             .slice_cards(phase, &title, &brief, &slices)
             .map_err(|e| RpcError::invalid(e.to_string()))?;
+        // A slice step whose crew is a pool: its cards wait for a member
+        // of the pool, made as each can start (daemon::pools).
+        {
+            let model = self.model();
+            if let Some(team) = model.session.team.as_ref() {
+                for spec in specs.iter_mut() {
+                    if spec.agent.as_deref().is_some_and(|a| team.is_pool(a)) {
+                        spec.agent = None;
+                    }
+                }
+            }
+        }
         // As laid: dependencies first, `depends` complete (the slices that
         // touch the same paths included).
         let slices =

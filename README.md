@@ -358,6 +358,9 @@ agents:
     role: reads the code and writes RESEARCH.md
     tools: [read, web]      # of its runtime's own tools; omit for all
     crew_tools: [messaging, git]   # of crew's tools; omit for all
+  - id: executor
+    role: carries one slice out
+    pool: 4                 # a template: up to 4 executors, one per slice that can start
 workflow:                   # the chain of cards one unit of work goes through
   steps:
     - id: research
@@ -372,8 +375,7 @@ workflow:                   # the chain of cards one unit of work goes through
       description: …
     - id: execute
       scope: slice            # one card per slice, side by side
-      agent: executor-1
-      agents: [executor-2]    # the slices take turns over these
+      agent: executor         # the pool: executor-1, executor-2, … as slices start
       depends_on: [plan]
       produces: [".planning/phases/{phase}/slices/{slice}/SUMMARY.md"]
       description: "Execute slice {slice} ({slice_title}): {slice_brief}"
@@ -467,6 +469,19 @@ declared in the workflow, so another workflow is another YAML:
   gsd-pi's planner records its own slices; declared again before any slice
   has started (a review changed the split), the cards are taken off the
   board and laid anew — once a slice has begun, they stay.
+- **Pools** — the hands for the slices are not a fixed roster. An agent
+  declared with `pool: N` is a template, not a member: a slice step names
+  it as its `agent`, and before every plan crew makes a member from it for
+  each slice card that can start and has no member free (`executor-1`,
+  `executor-2`, … the lowest numbers not taken, up to N at a time), as a
+  temporary member with the template's model, tools and crew tools, in a
+  worktree of its own. A pool's cards go only to its members and its
+  members take nothing else; one whose slice is done leaves once no card of
+  the pool waits for a member (a slice waiting on another keeps one rather
+  than making it again). So a phase with one slice gets one executor and a
+  phase with four gets four — gsd-pi's worker per slice. The roster keeps
+  the template, never the members; the orchestrator is not asked to find
+  them more to do.
 - **Landing** — under worktree isolation, a team with a workflow lands every
   completed card: when a card is completed its author's branch is merged
   into the integration branch (`agents/integration`, the one `integrate`

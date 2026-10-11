@@ -68,8 +68,9 @@ instructions: |
     done, read its result and run the workflow for the first phase
     (workflow_run) if crew has not: the workflow runs itself (auto). The
     planner queues the roadmap's phases, crew runs each once the one before
-    passed, the planner declares each phase's slices, the executors take
-    them side by side, the verify card follows once every slice is done, and
+    passed, the planner declares each phase's slices, crew makes an executor
+    per slice that can start (up to four at a time) and retires it with its
+    slice, the verify card follows once every slice is done, and
     a `gaps_found` verdict gets a follow-up run (`03-auth-gaps`, three at
     most). You decide what the workflow cannot: a `human_needed` verdict
     (operator_ask, then task_retry of the verify card so the outcome is
@@ -109,16 +110,16 @@ agents:
     model: gpt-6-astra
     tools: [read, shell]
     crew_tools: [messaging, review]
-  - id: executor-1
+  # A pool, not a member: crew makes an executor for each slice that can
+  # start (executor-1, executor-2, …, up to four at a time) and retires it
+  # when its slice is done, so a phase gets as many hands as its plan has
+  # independent slices.
+  - id: executor
     role: Executor. Carries one slice of a plan out, one commit per task, and writes its SUMMARY.md.
     model: opus
     tools: [read, write, shell]
     crew_tools: [messaging, git, spawn]
-  - id: executor-2
-    role: Executor. Carries one slice of a plan out, one commit per task, and writes its SUMMARY.md.
-    model: opus
-    tools: [read, write, shell]
-    crew_tools: [messaging, git, spawn]
+    pool: 4
   - id: verifier
     role: Verifier. Checks a phase goal-backward against the code and writes VERIFICATION.md.
     model: gpt-6.1-sol
@@ -184,8 +185,7 @@ workflow:
         slice has started.
     - id: execute
       scope: slice
-      agent: executor-1
-      agents: [executor-2]
+      agent: executor
       depends_on: [plan]
       produces: [".planning/phases/{phase}/slices/{slice}/SUMMARY.md"]
       description: |

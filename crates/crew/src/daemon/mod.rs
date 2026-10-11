@@ -40,6 +40,7 @@ mod limits;
 mod orchestrate;
 mod overlap;
 mod policy;
+mod pools;
 mod questions;
 mod retire;
 mod roster;

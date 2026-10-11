@@ -192,7 +192,14 @@ impl Entry {
         if style.agents.is_empty() {
             return "staffed by the orchestrator".to_string();
         }
-        let ids: Vec<&str> = style.agents.iter().map(|a| a.id.as_str()).collect();
+        let ids: Vec<String> = style
+            .agents
+            .iter()
+            .map(|a| match a.pool {
+                Some(n) => format!("{} (up to {n} at a time)", a.id),
+                None => a.id.clone(),
+            })
+            .collect();
         let orchestrator = if style.orchestrator.agent {
             " + orchestrator"
         } else {
@@ -303,7 +310,7 @@ mod tests {
         let gsd = styles.get("gsd").unwrap();
         assert_eq!(
             gsd.staffing(),
-            "researcher, planner, checker, executor-1, executor-2, verifier + orchestrator"
+            "researcher, planner, checker, executor (up to 4 at a time), verifier + orchestrator"
         );
         let gsd = &gsd.style;
         assert_eq!(

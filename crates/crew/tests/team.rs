@@ -9970,17 +9970,18 @@ fn slices_run_side_by_side_and_their_work_lands_for_what_comes_after() {
         ],
     })
     .to_string();
-    let executor = |id: &str| {
-        agent(
-            id,
-            "",
-            &[
-                "--on-task=write src/{task}.txt by {me}",
-                "--on-task=commit {task}",
-                "--on-task=done executed",
-            ],
-        )
-    };
+    // A pool, not members: crew makes executor-1, executor-2, … as slices
+    // can start, up to four at a time, and retires them with their slices.
+    let mut executor = agent(
+        "executor",
+        "",
+        &[
+            "--on-task=write src/{task}.txt by {me}",
+            "--on-task=commit {task}",
+            "--on-task=done executed",
+        ],
+    );
+    executor.pool = Some(4);
     let mut team = s.team(
         "slices",
         vec![
@@ -9994,8 +9995,7 @@ fn slices_run_side_by_side_and_their_work_lands_for_what_comes_after() {
                     "--on-task=done planned",
                 ],
             ),
-            executor("executor-1"),
-            executor("executor-2"),
+            executor,
             agent("verifier", "", &["--on-task=done verified"]),
         ],
         vec![],
@@ -10019,8 +10019,7 @@ fn slices_run_side_by_side_and_their_work_lands_for_what_comes_after() {
             Step {
                 id: "execute".into(),
                 scope: Scope::Slice,
-                agent: Some("executor-1".into()),
-                agents: vec!["executor-2".into()],
+                agent: Some("executor".into()),
                 depends_on: vec!["plan".into()],
                 description: "Execute {slice}: {slice_brief}".into(),
                 ..Step::default()
@@ -10036,8 +10035,9 @@ fn slices_run_side_by_side_and_their_work_lands_for_what_comes_after() {
         ..Workflow::default()
     });
     s.run(&team);
+    // The pool is a template: the team comes up without it.
     s.wait("the team to come up", |snap| {
-        snap.agents.len() == 5
+        snap.agents.len() == 3
             && snap
                 .agents
                 .iter()
@@ -10051,14 +10051,33 @@ fn slices_run_side_by_side_and_their_work_lands_for_what_comes_after() {
             .iter()
             .any(|t| t.id == "verify-p1" && t.status == TaskStatus::Done)
     });
-    // The slices took turns over the executors; docs waited for both the
-    // slice it named and the one whose paths it writes under.
+    // Two slices could start at once, so two executors were made and no
+    // more; docs waited for both the slice it named and the one whose
+    // paths it writes under, and took whichever of them was free.
     let api = find_task(&snapshot, "execute-p1-api");
     let ui = find_task(&snapshot, "execute-p1-ui");
     let docs = find_task(&snapshot, "execute-p1-docs");
     assert_eq!(api.assigned_agent.as_deref(), Some("executor-1"));
     assert_eq!(ui.assigned_agent.as_deref(), Some("executor-2"));
-    assert_eq!(docs.assigned_agent.as_deref(), Some("executor-1"));
+    let docs_owner = docs.assigned_agent.clone().unwrap();
+    assert!(
+        docs_owner == "executor-1" || docs_owner == "executor-2",
+        "{docs_owner}"
+    );
+    let joined: Vec<String> = s
+        .events()
+        .iter()
+        .filter(|e| e.event_type == "workflow.pool")
+        .map(|e| e.message.clone())
+        .collect();
+    assert_eq!(
+        joined,
+        [
+            "executor-1 joins from pool executor for a slice",
+            "executor-2 joins from pool executor for a slice"
+        ],
+        "{joined:?}"
+    );
     assert_eq!(api.dependencies, ["plan-p1"]);
     assert_eq!(ui.dependencies, ["plan-p1"]);
     assert_eq!(
@@ -10091,7 +10110,8 @@ fn slices_run_side_by_side_and_their_work_lands_for_what_comes_after() {
     assert_eq!(phase.slices[2].depends, ["ui", "api"]);
     assert_eq!(phase.slices[2].touches, ["src/api/README.md"]);
     // The verifier's worktree took every slice's work when its card was
-    // handed out; executor-1 took ui's (executor-2's) before docs.
+    // handed out; docs' executor took the other executor's slice before
+    // docs (the worktrees stay when a pool's member leaves).
     let tree = |agent: &str| s.workspace.join(".crew/worktrees").join(agent);
     for slice in ["api", "ui", "docs"] {
         assert!(
@@ -10101,12 +10121,26 @@ fn slices_run_side_by_side_and_their_work_lands_for_what_comes_after() {
             "the verifier starts from slice {slice}"
         );
     }
+    let (other_slice, other) = if docs_owner == "executor-1" {
+        ("ui", "executor-2")
+    } else {
+        ("api", "executor-1")
+    };
     assert_eq!(
-        std::fs::read_to_string(tree("executor-1").join("src/execute-p1-ui.txt"))
-            .unwrap()
-            .trim(),
-        "by executor-2"
+        std::fs::read_to_string(
+            tree(&docs_owner).join(format!("src/execute-p1-{other_slice}.txt"))
+        )
+        .unwrap()
+        .trim(),
+        format!("by {other}")
     );
+    // Their slices done and none waiting, the pool's members left.
+    s.wait("the pool's members to leave", |snap| {
+        !snap.agents.iter().any(|a| a.id.starts_with("executor-"))
+    });
+    assert!(s.events().iter().any(|e| e.event_type == "agent.removed"
+        && e.message
+            .contains("executor-1 left the team: its slice is done")));
     assert!(
         !s.workspace.join("src").exists(),
         "the base checkout is never touched"
