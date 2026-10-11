@@ -185,6 +185,9 @@ answers: `crew answer 2`.")]
     },
     /// Merge every agent branch into the integration branch
     Integrate,
+    /// The project memory: what the workspace remembers across sessions
+    #[command(subcommand)]
+    Memory(ops::MemoryCommand),
     /// Manage opt-in scoped device access for native applications
     #[command(subcommand)]
     Native(ops::NativeCommand),
@@ -691,6 +694,7 @@ pub fn run(cli: Cli) -> Result<()> {
         },
         Command::Messages { agent, lines, json } => ops::messages(&target, agent, lines, json),
         Command::Integrate => ops::integrate(&target),
+        Command::Memory(command) => ops::memory(&target, command),
         Command::Native(command) => ops::native(command),
         Command::Web {
             port,

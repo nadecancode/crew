@@ -102,10 +102,18 @@ fn claude(args: &[String]) -> Result<()> {
         return Ok(());
     }
     let dir = home_dir("CLAUDE_CONFIG_DIR", ".claude")?;
-    // Print mode (the daemon's own `claude -p /usage`) answers once and
-    // exits, like the real one: no session, transcript or hook.
+    // Print mode (the daemon's own `claude -p /usage`, a memory
+    // distillation) answers once and exits, like the real one: no session,
+    // transcript or hook. `CREW_FAKE_CLAUDE_PRINT_FILE` names what it
+    // prints, so a test can script the model's answer.
     if args.iter().any(|a| a == "-p" || a == "--print") {
-        return record(&dir, "fake-claude-print.json", args);
+        record(&dir, "fake-claude-print.json", args)?;
+        if let Some(reply) = env_path("CREW_FAKE_CLAUDE_PRINT_FILE") {
+            let text = std::fs::read_to_string(&reply)
+                .with_context(|| format!("reading {}", reply.display()))?;
+            print!("{text}");
+        }
+        return Ok(());
     }
     record(&dir, "fake-claude.json", args)?;
     // And one per agent (--name), for agents that share a configuration directory.

@@ -10456,3 +10456,336 @@ fn under_context_fresh_a_card_sent_back_by_its_reviewer_returns_to_its_session()
         .seq;
     assert!(approved < queued, "approved {approved}, queued {queued}");
 }
+
+/// The project memory: a member remembers something, everyone can read
+/// it, the limits and the ownership rule hold, the operator can replace and
+/// forget, and a member launched afterwards reads the gist in its briefing.
+#[test]
+fn the_team_remembers_for_later_sessions_and_a_fresh_member_reads_it() {
+    let s = Session::new();
+    let ws = s.workspace.to_string_lossy().into_owned();
+    let mut team = s.team(
+        "memory",
+        vec![agent("a", "builds", &[]), agent("b", "tests", &[])],
+        vec![],
+    );
+    // Where the team says, not only under .crew.
+    team.memory.dir = Some("notes/memory".into());
+    s.run(&team);
+    s.wait("agents to come up", |snap| {
+        snap.agents.len() == 2
+            && snap
+                .agents
+                .iter()
+                .all(|a| a.status != AgentStatus::Spawning)
+    });
+    assert!(s
+        .ok(&["memory", "list", "-C", &ws])
+        .contains("nothing is remembered yet"));
+
+    let add = |who: &str, args: Value| s.ctl(who, &["tool", "memory_add", &args.to_string()]);
+    let out = add(
+        "a",
+        json!({
+            "name": "docs-host-quill",
+            "description": "Docs that leave the repo go to Quill",
+            "kind": "decision",
+            "body": "Chosen over Notion: it has an API we can test against.",
+        }),
+    );
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        stdout(&out).contains("Remembered docs-host-quill"),
+        "{}",
+        stdout(&out)
+    );
+    let file = s.workspace.join("notes/memory/docs-host-quill.md");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        text.starts_with("---\nname: docs-host-quill\n")
+            && text.contains("kind: decision\nby: a\n")
+            && text.ends_with("test against.\n"),
+        "{text}"
+    );
+    assert!(s.has_event("memory.added"));
+    // The index Claude Code loads at a session's start lists it.
+    let index = std::fs::read_to_string(s.workspace.join("notes/memory/MEMORY.md")).unwrap();
+    assert!(
+        index.contains(
+            "- [docs-host-quill](docs-host-quill.md) — Docs that leave the repo go to Quill \
+(decision, a, "
+        ),
+        "{index}"
+    );
+
+    // Listed, shown, searched: by the tools and by the operator alike.
+    let listed = s.ok(&["memory", "list", "-C", &ws]);
+    assert!(
+        listed.contains("docs-host-quill") && listed.contains("[decision, a, "),
+        "{listed}"
+    );
+    assert!(s
+        .ok(&["memory", "show", "docs-host-quill", "-C", &ws])
+        .contains("Chosen over Notion"));
+    assert!(s
+        .ok(&["memory", "search", "quill", "-C", &ws])
+        .contains("docs-host-quill"));
+    assert!(s
+        .ok(&["memory", "search", "zebra", "-C", &ws])
+        .contains("nothing matches"));
+    let out = s.ctl("b", &["tool", "memory_search", r#"{"query":"notion api"}"#]);
+    assert!(stdout(&out).contains("docs-host-quill"), "{}", stdout(&out));
+    let out = s.ctl(
+        "b",
+        &["tool", "memory_get", r#"{"name":"docs-host-quill"}"#],
+    );
+    assert!(
+        stdout(&out).contains("decision, by a, 20") && stdout(&out).contains("Chosen over Notion"),
+        "{}",
+        stdout(&out)
+    );
+
+    // Refused: a bad name, a secret, someone else's memory, a member
+    // forgetting.
+    let out = add(
+        "a",
+        json!({ "name": "Bad Name", "description": "x", "body": "y" }),
+    );
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("not a memory name"),
+        "{}",
+        stderr(&out)
+    );
+    let out = add(
+        "a",
+        json!({ "name": "leak", "description": "x", "body": "push with ghp_abcdefghijklmnopqrstuvwxyz012345" }),
+    );
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("GitHub token"), "{}", stderr(&out));
+    let out = add(
+        "b",
+        json!({ "name": "docs-host-quill", "description": "x", "body": "mine now" }),
+    );
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("written by a"), "{}", stderr(&out));
+    let out = s.ctl(
+        "b",
+        &["tool", "memory_forget", r#"{"name":"docs-host-quill"}"#],
+    );
+    assert!(!out.status.success());
+    assert!(s
+        .ok(&["memory", "list", "-C", &ws])
+        .contains("docs-host-quill"));
+
+    // The operator replaces it, and a member launched after that reads the
+    // new gist in its briefing.
+    s.ok(&[
+        "memory",
+        "add",
+        "docs-host-quill",
+        "Docs go to Quill (confirmed)",
+        "--kind",
+        "decision",
+        "--body",
+        "Confirmed by the operator.",
+        "-C",
+        &ws,
+    ]);
+    assert!(s
+        .ok(&["memory", "show", "docs-host-quill", "-C", &ws])
+        .contains("Confirmed by the operator"));
+    assert!(s.has_event("memory.replaced"));
+    s.ok(&["agent", "restart", "b", "-C", &ws]);
+    s.wait("b to come back", |snap| {
+        find_agent(snap, "b").status != AgentStatus::Spawning
+            && s.events()
+                .iter()
+                .filter(|e| e.event_type == "agent.spawned" && e.agent_id.as_deref() == Some("b"))
+                .count()
+                >= 2
+    });
+    let briefing = std::fs::read_to_string(s.workspace.join(".crew/agents/b/briefing.md")).unwrap();
+    assert!(
+        briefing.contains("## Project memory")
+            && briefing
+                .contains("- docs-host-quill — Docs go to Quill (confirmed) (decision, operator, "),
+        "{briefing}"
+    );
+
+    // What a Claude Code member saves on its own, in Claude's format, is a
+    // memory of the team's too.
+    std::fs::write(
+        s.workspace.join("notes/memory/user_role.md"),
+        "---\nname: user_role\ndescription: The operator is the only developer\nmetadata:\n  type: user\n  originSessionId: 33430311-defb-4030-9c59-db43bcf477fd\n  modified: 2026-10-09T10:00:00Z\n---\n\nOne person reviews everything.\n",
+    )
+    .unwrap();
+    let listed = s.ok(&["memory", "list", "-C", &ws]);
+    assert!(
+        listed.contains("user_role") && listed.contains("[preference, claude, 2026-10-09]"),
+        "{listed}"
+    );
+    s.ok(&["memory", "forget", "user_role", "-C", &ws]);
+
+    // Forgotten by the operator: gone from the files and the listing.
+    s.ok(&["memory", "forget", "docs-host-quill", "-C", &ws]);
+    assert!(!file.exists());
+    assert!(s
+        .ok(&["memory", "list", "-C", &ws])
+        .contains("nothing is remembered yet"));
+    assert!(s.has_event("memory.forgotten"));
+}
+
+/// What crew remembers by itself: the operator's answers, as decisions,
+/// and how a session ended.
+#[test]
+fn what_the_operator_answers_and_how_a_session_ends_are_remembered() {
+    let s = Session::new();
+    let ws = s.workspace.to_string_lossy().into_owned();
+    let mut team = s.team(
+        "remember",
+        vec![agent("a", "builds", &[]), agent("b", "tests", &[])],
+        vec![],
+    );
+    team.orchestrator = OrchestratorConfig {
+        agent: true,
+        runtime: Some(RuntimeKind::Shell),
+        command: scripted(&[]),
+        ..OrchestratorConfig::default()
+    };
+    s.run(&team);
+    s.wait("agents to come up", |snap| {
+        snap.agents.len() == 3
+            && snap
+                .agents
+                .iter()
+                .all(|a| a.status != AgentStatus::Spawning)
+    });
+    let ask = |args: Value| s.ctl("orchestrator", &["tool", "operator_ask", &args.to_string()]);
+    let out = ask(json!({
+        "question": "Which document host should crew integrate first?",
+        "options": ["Quill", "Notion"],
+    }));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let question = s.snapshot().questions[0].id.clone();
+    s.ok(&[
+        "answer",
+        &question,
+        "Quill: it has an API we can test against",
+        "-C",
+        &ws,
+    ]);
+    s.wait_for("the decision to be remembered", || {
+        s.has_event("memory.added")
+    });
+    let memories = |s: &Session| -> Vec<crew_core::Memory> {
+        serde_json::from_str(&s.ok(&["memory", "list", "--json", "-C", &ws])).unwrap()
+    };
+    let all = memories(&s);
+    assert_eq!(all.len(), 1, "{all:?}");
+    let decision = &all[0];
+    assert_eq!(decision.name, "decision-which-document-host-should-crew");
+    assert_eq!(decision.kind, crew_core::MemoryKind::Decision);
+    assert_eq!(decision.by, "operator");
+    assert_eq!(
+        decision.description,
+        "Which document host should crew integrate first? → Quill: it has an API we can test \
+against"
+    );
+    assert!(
+        decision
+            .body
+            .contains("Question (orchestrator): Which document host")
+            && decision
+                .body
+                .contains("Answer (operator): Quill: it has an API"),
+        "{}",
+        decision.body
+    );
+    assert_eq!(decision.source.as_deref(), Some(question.as_str()));
+
+    // An answer that carries a secret is not remembered.
+    let out = ask(json!({ "question": "Which key?" }));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let question = s.snapshot().questions[0].id.clone();
+    s.ok(&[
+        "answer",
+        &question,
+        "use sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789",
+        "-C",
+        &ws,
+    ]);
+    s.wait_for("the second answer", || {
+        s.events()
+            .iter()
+            .filter(|e| e.event_type == "question.answered")
+            .count()
+            == 2
+    });
+    assert_eq!(memories(&s).len(), 1);
+
+    // How the session ended is the first thing the next one reads.
+    let out = s.ctl(
+        "orchestrator",
+        &[
+            "tool",
+            "session_complete",
+            &json!({ "summary": "Phase 01 landed; the Linear mirror is next." }).to_string(),
+        ],
+    );
+    assert!(out.status.success(), "{}", stderr(&out));
+    s.wait_for("the session to be remembered", || {
+        memories(&s)
+            .iter()
+            .any(|m| m.kind == crew_core::MemoryKind::Session)
+    });
+    let all = memories(&s);
+    let session = all
+        .iter()
+        .find(|m| m.kind == crew_core::MemoryKind::Session)
+        .unwrap();
+    assert!(session.name.starts_with("session-20"), "{}", session.name);
+    assert_eq!(session.by, "crew");
+    assert_eq!(
+        session.description,
+        "Phase 01 landed; the Linear mirror is next."
+    );
+    assert!(
+        session.body.contains("Objective: integration test")
+            && session.body.contains("Outcome: Phase 01 landed")
+            && session.body.contains("Team: a (builds), b (tests)"),
+        "{}",
+        session.body
+    );
+    // Newest first in the listing.
+    assert_eq!(all[0].name, session.name);
+}
+
+#[test]
+fn a_team_that_keeps_no_memory_offers_none() {
+    let s = Session::new();
+    let ws = s.workspace.to_string_lossy().into_owned();
+    let mut team = s.team("forgetful", vec![agent("a", "builds", &[])], vec![]);
+    team.memory.enabled = false;
+    s.run(&team);
+    s.wait("a to come up", |snap| {
+        find_agent(snap, "a").status != AgentStatus::Spawning
+    });
+    let out = s.crew(&["memory", "list", "-C", &ws]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("keeps no memory"), "{}", stderr(&out));
+    let out = s.ctl(
+        "a",
+        &[
+            "tool",
+            "memory_add",
+            r#"{"name":"x","description":"y","body":"z"}"#,
+        ],
+    );
+    assert!(!out.status.success());
+    let briefing = std::fs::read_to_string(s.workspace.join(".crew/agents/a/briefing.md")).unwrap();
+    assert!(
+        !briefing.contains("Project memory") && !briefing.contains("memory_add"),
+        "{briefing}"
+    );
+}

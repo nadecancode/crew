@@ -819,6 +819,61 @@ pub struct Event {
     pub data: Value,
 }
 
+/// Longest name of a memory (`[a-z0-9-]`).
+pub const MAX_MEMORY_NAME_CHARS: usize = 64;
+/// Longest one-line description of a memory.
+pub const MAX_MEMORY_DESCRIPTION_CHARS: usize = 200;
+/// Longest body of a memory.
+pub const MAX_MEMORY_BODY_CHARS: usize = 4000;
+/// Most memories a workspace keeps; past it, `memory_add` is refused until
+/// one is forgotten.
+pub const MAX_MEMORIES: usize = 500;
+
+string_enum! {
+    /// What kind of thing a memory records: something settled and why
+    /// (`decision`), how this project does a thing (`convention`), what
+    /// the operator wants and does not (`preference`), where something is
+    /// or stands (`fact`), what went wrong once (`pitfall`), or what a
+    /// session set out to do and came to, written by crew (`session`).
+    MemoryKind {
+        Decision => "decision",
+        Convention => "convention",
+        Preference => "preference",
+        Fact => "fact",
+        Pitfall => "pitfall",
+        Session => "session",
+    }
+}
+
+// The macro makes the enum; a `#[default]` on a variant has no way in.
+#[allow(clippy::derivable_impls)]
+impl Default for MemoryKind {
+    fn default() -> Self {
+        MemoryKind::Fact
+    }
+}
+
+/// One thing the workspace remembers across sessions: a short, named note
+/// that every later member reads the gist of in its briefing and can read
+/// in full. See `crew::memory`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct Memory {
+    /// `[a-z0-9-]`, at most [`MAX_MEMORY_NAME_CHARS`]; the file's name.
+    pub name: String,
+    /// One line, the gist, read by every member in its briefing.
+    pub description: String,
+    #[serde(default)]
+    pub kind: MemoryKind,
+    /// Who wrote it: a member's id, `operator`, or `crew`.
+    pub by: String,
+    /// When, in milliseconds since the epoch.
+    pub at: i64,
+    /// Where it came from, for the record: a message or task id, a commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    pub body: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

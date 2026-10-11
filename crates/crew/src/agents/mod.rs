@@ -153,6 +153,11 @@ pub struct LaunchContext<'a> {
     /// CLI keeps its configuration, credentials and sessions there instead of in
     /// the operator's.
     pub private_home: Option<&'a Path>,
+    /// The team's memory directory (`crate::memory`): a runtime with a memory
+    /// of its own (Claude Code) keeps it there, shared with the team, rather
+    /// than in the operator's own. `None`: the team keeps no memory, and the
+    /// runtime's own is switched off.
+    pub memory_dir: Option<&'a Path>,
 }
 
 /// A fully resolved process launch: a program and an argument array. Nothing

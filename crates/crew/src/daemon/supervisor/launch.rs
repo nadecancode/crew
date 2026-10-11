@@ -238,6 +238,11 @@ impl Daemon {
         } else {
             String::new()
         };
+        // What the workspace remembers, read afresh: an edit on disk, or a
+        // memory added since, is in the next briefing. The directory is the
+        // runtime's own memory too, where it has one.
+        let memories = self.memories_for_briefing();
+        let memory_dir = self.memory_store().map(|s| s.dir().to_path_buf());
         let view = TeamView {
             project: &team.project,
             objective: &team.objective,
@@ -255,6 +260,7 @@ impl Daemon {
                 crew_tools: &cut_crew,
                 pools: &pools,
             },
+            memory: memories.as_deref(),
         };
         let briefing = if agent.orchestrator {
             prompt::orchestrator_briefing(&view)
@@ -396,6 +402,7 @@ impl Daemon {
                 endpoint: &endpoint,
                 long_context,
                 private_home: private_home.as_deref(),
+                memory_dir: memory_dir.as_deref(),
             })
         };
         let mut spec = make_spec(&local.settings)?;

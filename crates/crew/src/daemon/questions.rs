@@ -278,6 +278,8 @@ explanation in the question: {}",
                 tracing::warn!("copying an answer to {member} failed: {}", e.message);
             }
         }
+        // What the operator decided is what a later session must know.
+        self.remember_answer(&question, body);
         self.emit(
             NewEvent::new(
                 "bus",

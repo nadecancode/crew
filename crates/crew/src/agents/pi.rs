@@ -693,6 +693,7 @@ mod tests {
                 endpoint: &endpoint,
                 long_context: false,
                 private_home: None,
+                memory_dir: None,
             })
             .unwrap();
         assert!(spec
@@ -724,6 +725,7 @@ mod tests {
                 endpoint: &Endpoint::default(),
                 long_context: false,
                 private_home: Some(&home),
+                memory_dir: None,
             })
             .unwrap();
         let var = |name: &str| {
@@ -752,6 +754,7 @@ mod tests {
                 endpoint: &Endpoint::default(),
                 long_context: false,
                 private_home: None,
+                memory_dir: None,
             })
             .unwrap();
         assert!(!plain.env.iter().any(|(k, _)| k == AGENT_DIR_ENV));
@@ -781,6 +784,7 @@ mod tests {
                     endpoint: &endpoint,
                     long_context: false,
                     private_home,
+                    memory_dir: None,
                 })
                 .unwrap()
         };
@@ -834,6 +838,7 @@ mod tests {
                 endpoint: &endpoint,
                 long_context: false,
                 private_home: Some(&home),
+                memory_dir: None,
             })
             .unwrap();
         let all: Vec<_> = spec
@@ -867,6 +872,7 @@ mod tests {
                     endpoint: &Endpoint::default(),
                     long_context: false,
                     private_home: None,
+                    memory_dir: None,
                 })
                 .unwrap()
                 .args
@@ -907,6 +913,7 @@ mod tests {
             endpoint: &Endpoint::default(),
             long_context: false,
             private_home: None,
+            memory_dir: None,
         };
         let spec = PiRuntime.launch(&ctx).unwrap();
         assert_eq!(spec.program, "pi");
@@ -1044,6 +1051,7 @@ mod tests {
                     endpoint: &endpoint,
                     long_context: false,
                     private_home: None,
+                    memory_dir: None,
                 })
                 .unwrap();
             std::fs::read_to_string(dir.path().join(EXTENSION_FILE)).unwrap()

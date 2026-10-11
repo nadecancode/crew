@@ -100,23 +100,23 @@ defaults:
   refusal_fallbacks: [glm-5.3, deepseek-v4-flash]
 orchestrator:
   # Cards go on the board through the workflow; the roster is fixed.
-  crew_tools: [messaging, workflow, task_edit, task_retry]
+  crew_tools: [messaging, workflow, task_edit, task_retry, memory]
 agents:
   - id: researcher
     role: Phase researcher. Reads the codebase and the requirements and writes RESEARCH.md for a phase.
     model: opus
     tools: [read, write, web]
-    crew_tools: [messaging, git]
+    crew_tools: [messaging, git, memory]
   - id: planner
     role: Planner. Writes the project roadmap and queues its phases; turns each phase's research into PLAN.md and declares its slices.
     model: fable
     tools: [read, write]
-    crew_tools: [messaging, git, workflow_phases, workflow_slices]
+    crew_tools: [messaging, git, workflow_phases, workflow_slices, memory]
   - id: checker
     role: Plan checker. Reviews the roadmap and every plan; approves only what a fresh executor could carry out.
     model: gpt-6-astra
     tools: [read, shell]
-    crew_tools: [messaging, review]
+    crew_tools: [messaging, review, memory]
   # A pool, not a member: crew makes an executor for each slice that can
   # start (executor-1, executor-2, …, up to four at a time) and retires it
   # when its slice is done, so a phase gets as many hands as its plan has
@@ -125,13 +125,13 @@ agents:
     role: Executor. Carries one slice of a plan out, one commit per task, and writes its SUMMARY.md.
     model: opus
     tools: [read, write, shell]
-    crew_tools: [messaging, git, spawn]
+    crew_tools: [messaging, git, spawn, memory]
     pool: 4
   - id: verifier
     role: Verifier. Checks a phase goal-backward against the code and writes VERIFICATION.md.
     model: gpt-6.1-sol
     tools: [read, write, shell]
-    crew_tools: [messaging, git]
+    crew_tools: [messaging, git, memory]
 tasks:
   - id: roadmap
     title: "Roadmap: PROJECT.md, REQUIREMENTS.md, ROADMAP.md, STATE.md"

@@ -10,7 +10,10 @@ use crew_core::config::TaskSpec;
 use crew_core::rpc::{Call, CommitInfo, GitOutcome, InboxResult, SendParams, SendResult, TaskCard};
 use crew_core::types::{AgentToolbox, ToolboxItem, ToolboxItemCode};
 use crew_core::util::{fmt_clock, one_line, truncate_chars};
-use crew_core::{Agent, AgentStatus, Artifact, Message, MessageType, Task, BROADCAST, OPERATOR_ID};
+use crew_core::{
+    Agent, AgentStatus, Artifact, Memory, MemoryKind, Message, MessageType, Task, BROADCAST,
+    OPERATOR_ID,
+};
 use serde_json::{json, Value};
 
 pub struct ToolDef {
@@ -552,6 +555,61 @@ asked.",
                 &["summary"],
             ),
         ),
+        tool(
+            "memory_list",
+            "The project memory: every memory's name, gist, kind, author and date, newest \
+first. What earlier sessions and teammates learned about this project.",
+            object(json!({}), &[]),
+            true,
+        ),
+        tool(
+            "memory_get",
+            "One memory in full.",
+            object(
+                json!({ "name": { "type": "string", "description": "The memory's name" } }),
+                &["name"],
+            ),
+            true,
+        ),
+        tool(
+            "memory_search",
+            "The memories matching words, best first: a word in the name counts most, in the \
+gist next, in the body least.",
+            object(
+                json!({
+                    "query": { "type": "string", "description": "Words to look for" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 50, "description": "At most this many (10)" },
+                }),
+                &["query"],
+            ),
+            true,
+        ),
+        tool(
+            "memory_add",
+            "Remember something for later sessions: a decision and why, a convention, a \
+pitfall, a preference of the operator's, where something stands. Not a secret, and not what \
+the code or a commit already says. Your own memory of that name is replaced; someone else's is \
+not (pick another name, or the orchestrator replaces it).",
+            object(
+                json!({
+                    "name": { "type": "string", "description": "[a-z0-9-], at most 64 characters, like docs-host-quill" },
+                    "description": { "type": "string", "description": "One line, at most 200 characters: the gist, read in every briefing" },
+                    "kind": { "type": "string", "enum": ["decision", "convention", "preference", "fact", "pitfall"], "description": "What it records (fact when left out)" },
+                    "body": { "type": "string", "description": "At most 4000 characters: what a later session needs to know, and why; [[name]] links another memory" },
+                    "source": { "type": "string", "description": "Where it came from: a task, message or commit id" },
+                }),
+                &["name", "description", "body"],
+            ),
+            false,
+        ),
+        orchestrator(
+            "memory_forget",
+            "Drop a memory that is wrong or stale.",
+            object(
+                json!({ "name": { "type": "string", "description": "The memory's name" } }),
+                &["name"],
+            ),
+        ),
     ]
 }
 
@@ -659,6 +717,45 @@ fn rpc<T: serde::de::DeserializeOwned>(
     let typed =
         serde_json::from_value(raw.clone()).map_err(|e| format!("unexpected response: {e}"))?;
     Ok((typed, raw))
+}
+
+/// The memory index as the tools print it: one line each.
+fn render_memories(memories: &[Memory], none: &str) -> String {
+    if memories.is_empty() {
+        return none.to_string();
+    }
+    memories
+        .iter()
+        .map(|m| {
+            format!(
+                "- {} — {} ({}, {}, {})",
+                m.name,
+                m.description,
+                m.kind,
+                m.by,
+                crate::memory::date_of(m.at)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// One memory in full.
+fn render_memory(m: &Memory) -> String {
+    let mut out = format!(
+        "{} — {}\n{}, by {}, {}",
+        m.name,
+        m.description,
+        m.kind,
+        m.by,
+        crate::memory::date_of(m.at)
+    );
+    if let Some(source) = &m.source {
+        out.push_str(&format!(", from {source}"));
+    }
+    out.push_str("\n\n");
+    out.push_str(&m.body);
+    out
 }
 
 fn status_cell(agent: &Agent) -> String {
@@ -1550,6 +1647,69 @@ done and you have been told so."
                 },
             )?;
             out(format!("Task {} created ({}).", task.id, task.status), raw)
+        }
+        "memory_list" => {
+            let (memories, raw): (Vec<Memory>, _) = rpc(client, Call::MemoryList)?;
+            out(
+                render_memories(&memories, "Nothing is remembered yet."),
+                raw,
+            )
+        }
+        "memory_get" => {
+            let (memory, raw): (Memory, _) = rpc(
+                client,
+                Call::MemoryGet {
+                    name: arg_str(args, "name")?,
+                },
+            )?;
+            out(render_memory(&memory), raw)
+        }
+        "memory_search" => {
+            let (memories, raw): (Vec<Memory>, _) = rpc(
+                client,
+                Call::MemorySearch {
+                    query: arg_str(args, "query")?,
+                    limit: args
+                        .get("limit")
+                        .and_then(Value::as_u64)
+                        .map(|n| n as usize),
+                },
+            )?;
+            out(render_memories(&memories, "Nothing matches."), raw)
+        }
+        "memory_add" => {
+            let kind = match opt_str(args, "kind") {
+                Some(kind) => Some(kind.parse::<MemoryKind>()?),
+                None => None,
+            };
+            let (result, raw): (Value, _) = rpc(
+                client,
+                Call::MemoryAdd {
+                    name: arg_str(args, "name")?,
+                    description: arg_str(args, "description")?,
+                    kind,
+                    body: arg_str(args, "body")?,
+                    source: opt_str(args, "source"),
+                },
+            )?;
+            let name = result["memory"]["name"].as_str().unwrap_or("").to_string();
+            let replaced = result["replaced"].as_bool().unwrap_or(false);
+            out(
+                format!(
+                    "Remembered {name}{}; every later session's members read its gist.",
+                    if replaced {
+                        " (replacing the earlier one)"
+                    } else {
+                        ""
+                    }
+                ),
+                raw,
+            )
+        }
+        "memory_forget" => {
+            let name = arg_str(args, "name")?;
+            let (_, raw): (Value, _) = rpc(client, Call::MemoryForget { name: name.clone() })?;
+            out(format!("Forgot {name}."), raw)
         }
         "task_edit" => {
             let (task, raw): (Task, _) = rpc(

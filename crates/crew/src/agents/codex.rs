@@ -520,6 +520,7 @@ mod tests {
             endpoint: &Endpoint::default(),
             long_context: false,
             private_home: None,
+            memory_dir: None,
         };
         let spec = CodexRuntime.launch(&ctx).unwrap();
         assert_eq!(spec.program, "codex");
@@ -603,6 +604,7 @@ mod tests {
             .launch(&LaunchContext {
                 long_context: true,
                 private_home: None,
+                memory_dir: None,
                 settings: &AgentSettings {
                     socket_delivery: true,
                     ..settings.clone()
@@ -657,6 +659,7 @@ mod tests {
                 endpoint: &endpoint,
                 long_context: false,
                 private_home: None,
+                memory_dir: None,
             })
             .unwrap();
         let developer = spec
@@ -718,6 +721,7 @@ mod tests {
                 endpoint: &endpoint,
                 long_context: false,
                 private_home: Some(private.path()),
+                memory_dir: None,
             })
             .unwrap();
         // What the daemon puts in the system prompt comes from the operator's
@@ -762,6 +766,7 @@ mod tests {
                     endpoint,
                     long_context: false,
                     private_home: None,
+                    memory_dir: None,
                 })
                 .unwrap()
         };
@@ -845,6 +850,7 @@ mod tests {
                 endpoint: &Endpoint::default(),
                 long_context: false,
                 private_home: None,
+                memory_dir: None,
             })
             .unwrap();
         let socket = spec.sidecar.expect("an app-server sidecar").socket;
@@ -869,6 +875,7 @@ mod tests {
                 endpoint: &Endpoint::default(),
                 long_context: false,
                 private_home: None,
+                memory_dir: None,
             })
             .unwrap();
         let sidecar = spec.sidecar.expect("an app-server sidecar");
@@ -930,6 +937,7 @@ mod tests {
                 endpoint: &endpoint,
                 long_context: false,
                 private_home: None,
+                memory_dir: None,
             })
             .unwrap();
         assert!(spec
@@ -967,6 +975,7 @@ mod tests {
                     endpoint: &Endpoint::default(),
                     long_context: false,
                     private_home: None,
+                    memory_dir: None,
                 })
                 .unwrap()
         };
@@ -1027,6 +1036,7 @@ mod tests {
                     endpoint: &Endpoint::default(),
                     long_context: false,
                     private_home,
+                    memory_dir: None,
                 })
                 .unwrap()
         };
@@ -1066,6 +1076,7 @@ mod tests {
                 endpoint: &Endpoint::default(),
                 long_context: false,
                 private_home: None,
+                memory_dir: None,
             })
             .unwrap();
         let sidecar = spec.sidecar.expect("an app-server sidecar");
@@ -1095,6 +1106,7 @@ mod tests {
                 endpoint: &Endpoint::default(),
                 long_context: false,
                 private_home: None,
+                memory_dir: None,
             })
             .unwrap();
         assert!(yolo
@@ -1134,6 +1146,7 @@ mod tests {
                     endpoint: &Endpoint::default(),
                     long_context: false,
                     private_home: None,
+                    memory_dir: None,
                 })
                 .unwrap();
             assert_eq!(

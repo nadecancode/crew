@@ -263,6 +263,17 @@ impl AgentRuntime for ClaudeRuntime {
         // session to another model by itself instead of asking at the
         // terminal (its "Ask each time" setting would hold the agent there).
         settings["switchModelsOnFlag"] = json!(true);
+        // Claude Code's own memory is the team's: one directory for every
+        // member and worktree, which crew indexes for the whole team. Left
+        // alone, the orchestrator would read and write the operator's own
+        // memory of the workspace, and a member one of its worktree's.
+        match ctx.memory_dir {
+            Some(dir) => {
+                settings["autoMemoryEnabled"] = json!(true);
+                settings["autoMemoryDirectory"] = json!(dir.to_string_lossy());
+            }
+            None => settings["autoMemoryEnabled"] = json!(false),
+        }
         apply_endpoint(&mut settings, ctx.endpoint, ctx.crew_bin, ctx.identity_path);
         write_private_file(&settings_path, &serde_json::to_vec_pretty(&settings)?)?;
         write_private_file(&briefing_path, ctx.briefing.as_bytes())?;
@@ -769,6 +780,7 @@ mod tests {
                 endpoint: &endpoint,
                 long_context: false,
                 private_home: None,
+                memory_dir: None,
             })
             .unwrap();
         assert!(spec
@@ -801,6 +813,7 @@ mod tests {
                     endpoint: &Endpoint::default(),
                     long_context: false,
                     private_home,
+                    memory_dir: None,
                 })
                 .unwrap()
         };
@@ -837,6 +850,7 @@ mod tests {
                     endpoint: &Endpoint::default(),
                     long_context: false,
                     private_home: None,
+                    memory_dir: None,
                 })
                 .unwrap()
                 .args
@@ -856,6 +870,52 @@ WebFetch,WebSearch"
         assert_eq!(claude_tools(&[]), ["Skill", "TodoWrite", "ToolSearch"]);
         assert!(claude_tools(&ToolClass::ALL).contains(&"Agent"));
         assert!(!claude_tools(&[ToolClass::Shell]).contains(&"Edit"));
+    }
+
+    #[test]
+    fn the_teams_memory_is_claude_codes_own_memory_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = agent(dir.path());
+        let settings = AgentSettings::default();
+        let identity = dir.path().join("identity.json");
+        let memory = dir.path().join("memory");
+        let ctx = LaunchContext {
+            agent: &agent,
+            settings: &settings,
+            crew_bin: Path::new("/opt/crew"),
+            agent_dir: dir.path(),
+            identity_path: &identity,
+            briefing: "be helpful",
+            resume: false,
+            endpoint: &Endpoint::default(),
+            long_context: false,
+            private_home: None,
+            memory_dir: Some(&memory),
+        };
+        ClaudeRuntime.launch(&ctx).unwrap();
+        let settings_file: Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(settings_file["autoMemoryEnabled"], json!(true));
+        assert_eq!(
+            settings_file["autoMemoryDirectory"],
+            json!(memory.to_string_lossy())
+        );
+        // A team that keeps no memory: the runtime's own is off too, so a
+        // member neither reads nor writes the operator's.
+        ClaudeRuntime
+            .launch(&LaunchContext {
+                memory_dir: None,
+                ..ctx
+            })
+            .unwrap();
+        let settings_file: Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(settings_file["autoMemoryEnabled"], json!(false));
+        assert!(settings_file.get("autoMemoryDirectory").is_none());
     }
 
     #[test]
@@ -879,6 +939,7 @@ WebFetch,WebSearch"
             endpoint: &Endpoint::default(),
             long_context: false,
             private_home: None,
+            memory_dir: None,
         };
         let spec = ClaudeRuntime.launch(&ctx).unwrap();
         assert_eq!(spec.program, "claude");
@@ -906,6 +967,7 @@ WebFetch,WebSearch"
                 // The 1M-token window is a tag on the model's name.
                 long_context: true,
                 private_home: None,
+                memory_dir: None,
             })
             .unwrap()
             .args
@@ -1027,6 +1089,7 @@ WebFetch,WebSearch"
                 endpoint: &Endpoint::default(),
                 long_context: false,
                 private_home: None,
+                memory_dir: None,
             })
             .unwrap();
         let at = with_mod
@@ -1061,6 +1124,7 @@ WebFetch,WebSearch"
                     endpoint,
                     long_context: false,
                     private_home: None,
+                    memory_dir: None,
                 })
                 .unwrap();
             let text = std::fs::read_to_string(dir.path().join("settings.json")).unwrap();

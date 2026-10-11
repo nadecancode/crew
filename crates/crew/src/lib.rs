@@ -22,6 +22,7 @@ pub mod endpoints;
 pub mod git;
 pub mod limits;
 pub mod mcp;
+pub mod memory;
 pub mod message_bus;
 pub mod models;
 #[cfg(feature = "native-gateway")]

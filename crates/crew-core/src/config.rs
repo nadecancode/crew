@@ -80,6 +80,9 @@ pub struct Style {
     pub tasks: Vec<TaskSpec>,
     #[serde(default)]
     pub limits: Limits,
+    /// What the workspace remembers across sessions (see `crew::memory`).
+    #[serde(default, skip_serializing_if = "MemoryConfig::is_default")]
+    pub memory: MemoryConfig,
 }
 
 impl Style {
@@ -141,6 +144,7 @@ impl Style {
             agents: self.agents.clone(),
             tasks: self.tasks.clone(),
             limits: self.limits.clone(),
+            memory: self.memory.clone(),
         }
     }
 }
@@ -185,6 +189,82 @@ pub struct TeamConfig {
     pub tasks: Vec<TaskSpec>,
     #[serde(default)]
     pub limits: Limits,
+    /// What the workspace remembers across sessions (see `crew::memory`).
+    #[serde(default, skip_serializing_if = "MemoryConfig::is_default")]
+    pub memory: MemoryConfig,
+}
+
+/// The workspace's memory: short notes every later session's members read
+/// before interpreting the objective or a card.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryConfig {
+    /// Off: nothing is remembered or briefed, and the memory tools refuse.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Where the memories live, relative to the workspace (`.crew/memory`
+    /// when unset: the workspace's own state, not committed). Point it at
+    /// a committed folder for a memory that travels with the repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<PathBuf>,
+    /// How many memories a briefing lists (the newest); the rest are a
+    /// `memory_search` away.
+    #[serde(default = "default_memory_brief")]
+    pub brief: usize,
+    /// The model that distils a finished card into memories (a Claude Code
+    /// model name; `haiku` unless set), from the card and its member's
+    /// transcript; `off` keeps only what members and the operator write.
+    #[serde(default = "default_memory_extract")]
+    pub extract: String,
+}
+
+fn default_memory_brief() -> usize {
+    50
+}
+
+fn default_memory_extract() -> String {
+    "haiku".to_string()
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            dir: None,
+            brief: default_memory_brief(),
+            extract: default_memory_extract(),
+        }
+    }
+}
+
+impl MemoryConfig {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Refuse a directory that is not a plain relative path inside the
+    /// workspace.
+    pub fn validate(&self) -> Result<()> {
+        if let Some(dir) = &self.dir {
+            if dir.is_absolute()
+                || dir
+                    .components()
+                    .any(|c| !matches!(c, std::path::Component::Normal(_)))
+            {
+                bail!(
+                    "memory.dir must be a plain relative path inside the workspace, not {}",
+                    dir.display()
+                );
+            }
+        }
+        if self.brief > 200 {
+            bail!("memory.brief: at most 200 memories can be briefed");
+        }
+        if self.extract.trim().is_empty() {
+            bail!("memory.extract: a model name, or `off`");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -1027,6 +1107,7 @@ itself",
         if let Some(workflow) = &self.workflow {
             workflow.validate(&self.agents)?;
         }
+        self.memory.validate()?;
         validate_model_fallbacks(&self.defaults.model_fallbacks)?;
         validate_refusal_fallbacks(&self.defaults.refusal_fallbacks)?;
         for (key, model) in [

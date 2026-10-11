@@ -161,6 +161,12 @@ impl Session {
             agents,
             tasks,
             limits: Default::default(),
+            // No model is asked to distil cards unless a test says so (it
+            // would be the real `claude` on PATH).
+            memory: crew_core::config::MemoryConfig {
+                extract: "off".into(),
+                ..Default::default()
+            },
         }
     }
 

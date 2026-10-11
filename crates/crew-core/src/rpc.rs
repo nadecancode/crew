@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::config::{AgentSpec, TaskSpec, TeamConfig};
-use crate::types::{AgentStatus, Artifact, RuntimeKind, WebEventKind};
+use crate::types::{AgentStatus, Artifact, MemoryKind, RuntimeKind, WebEventKind};
 
 pub use crew_protocol::rpc::*;
 pub use crew_protocol::{asides, docs, epics, features, usage_metrics};
@@ -344,6 +344,34 @@ pub enum Call {
         id: String,
         agent: String,
     },
+    /// The workspace's memory (see `crew::memory`): every memory, one in
+    /// full, the ones matching words.
+    #[serde(deserialize_with = "empty_params")]
+    MemoryList,
+    MemoryGet {
+        name: String,
+    },
+    MemorySearch {
+        query: String,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    /// Remember something for later sessions; a memory of the same name by
+    /// the same author (or by anyone, for the orchestrator and the
+    /// operator) is replaced.
+    MemoryAdd {
+        name: String,
+        description: String,
+        #[serde(default)]
+        kind: Option<MemoryKind>,
+        body: String,
+        #[serde(default)]
+        source: Option<String>,
+    },
+    /// Orchestrator or operator: drop a memory that is wrong or stale.
+    MemoryForget {
+        name: String,
+    },
     TaskComplete {
         #[serde(default)]
         task_id: Option<String>,
@@ -635,6 +663,11 @@ impl Call {
             Call::TaskCreate { .. } => "task_create",
             Call::TaskEdit { .. } => "task_edit",
             Call::TaskAssign { .. } => "task_assign",
+            Call::MemoryList => "memory_list",
+            Call::MemoryGet { .. } => "memory_get",
+            Call::MemorySearch { .. } => "memory_search",
+            Call::MemoryAdd { .. } => "memory_add",
+            Call::MemoryForget { .. } => "memory_forget",
             Call::TaskComplete { .. } => "task_complete",
             Call::TaskFail { .. } => "task_fail",
             Call::TaskRetry { .. } => "task_retry",

@@ -257,7 +257,7 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(
             names.len(),
-            105,
+            110,
             "a new daemon method needs a deliberate gateway policy"
         );
         let reads = [
@@ -366,6 +366,13 @@ mod tests {
             "toolbox_reload",
             "toolbox_report",
             "toolbox_server",
+            // The project memory is the team's and the operator's at the
+            // workspace, not a device's.
+            "memory_list",
+            "memory_get",
+            "memory_search",
+            "memory_add",
+            "memory_forget",
         ];
         let assigned = reads
             .iter()

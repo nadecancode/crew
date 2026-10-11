@@ -1248,6 +1248,9 @@ with review_submit(task_id=\"{}\", approve=true|false).",
         note.push_str(&self.leaving_note(author));
         self.notify_orchestrator(&note).await;
         self.report_to_parent(task, author).await;
+        // What a later session should know from this card, in the
+        // background: the member's turn is over.
+        self.distill_card(task.clone(), author.to_string());
     }
 
     /// Mark a task failed (crash, timeout) and release its agent. A refused

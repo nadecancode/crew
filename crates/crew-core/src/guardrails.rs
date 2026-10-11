@@ -138,6 +138,8 @@ pub const CREW_TOOL_GROUPS: &[(&str, &[&str])] = &[
         "workflow",
         &["workflow_run", "workflow_slices", "workflow_phases"],
     ),
+    // Reading the memory is always a member's; writing it can be cut.
+    ("memory", &["memory_add"]),
 ];
 
 /// Every tool a `crew_tools` list governs.

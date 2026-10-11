@@ -5,7 +5,7 @@ use std::fmt::Write;
 
 use crew_core::config::Voice;
 use crew_core::guardrails::{self, Messaging, ToolClass, Workflow};
-use crew_core::{Agent, Message, Task, ORCHESTRATOR_ID};
+use crew_core::{Agent, Memory, Message, Task, ORCHESTRATOR_ID};
 
 /// Per-message cap when injecting bodies into a session; the full text stays
 /// available through `agent_inbox`.
@@ -30,6 +30,62 @@ pub struct TeamView<'a> {
     pub voice: Voice,
     /// What the team's style fixes about how members act.
     pub rules: Rules<'a>,
+    /// The workspace's memory, newest first, as many as the team briefs;
+    /// `None` when the team keeps none (the memory tools are not offered).
+    pub memory: Option<&'a [Memory]>,
+}
+
+/// The memory as a briefing section: the index, and what to do with it.
+fn memory_section(view: &TeamView<'_>, me: &str, orchestrator: bool) -> String {
+    let Some(memories) = view.memory else {
+        return String::new();
+    };
+    let selection = view.rules.crew_tools_of(me);
+    let can_add = guardrails::crew_tool_allowed(selection, "memory_add");
+    let mut out = String::from("\n## Project memory\n");
+    let keep = if can_add {
+        " memory_add(name, description, kind, body) keeps what a later session would need: a \
+decision and why, a convention, a pitfall, a preference of the operator's — never a secret, never \
+what the code or a commit already says."
+    } else {
+        ""
+    };
+    if memories.is_empty() {
+        let _ = writeln!(
+            out,
+            "Nothing is remembered about this project yet.{}",
+            if can_add {
+                keep
+            } else {
+                " What the operator answers and how a session ends are remembered by crew."
+            }
+        );
+        return out;
+    }
+    let _ = writeln!(
+        out,
+        "What earlier sessions and teammates learned about this project, kept across sessions. \
+The {} may be terse: read what applies before interpreting {}, and ask only where the memory is \
+silent. memory_get(name) reads one in full, memory_search(words) finds more.{keep}",
+        if orchestrator {
+            "objective"
+        } else {
+            "objective and a card"
+        },
+        if orchestrator { "it" } else { "them" },
+    );
+    for m in memories {
+        let _ = writeln!(
+            out,
+            "- {} — {} ({}, {}, {})",
+            m.name,
+            m.description,
+            m.kind,
+            m.by,
+            crate::memory::date_of(m.at)
+        );
+    }
+    out
 }
 
 /// The team's guardrails as a briefing says them (`crew_core::guardrails`):
@@ -65,7 +121,7 @@ impl Rules<'_> {
 
 /// The tool lines of `text` a member gets: all, or those its `crew_tools`
 /// selection allows (each line is `- <name>(…) — …`).
-fn tool_lines(text: &str, selection: Option<&[String]>) -> String {
+fn tool_lines(text: &str, selection: Option<&[String]>, memory: bool) -> String {
     text.lines()
         .filter(|line| {
             let name = line
@@ -73,7 +129,9 @@ fn tool_lines(text: &str, selection: Option<&[String]>) -> String {
                 .split(['(', ' '])
                 .next()
                 .unwrap_or("");
-            guardrails::crew_tool_allowed(selection, name)
+            // A team that keeps no memory is not offered its tools.
+            (memory || !name.starts_with("memory_"))
+                && guardrails::crew_tool_allowed(selection, name)
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -294,7 +352,12 @@ of this one kept, your open card handed to it again. For when what came before n
 - tasks_list(done?) — the board: open tasks in full, done ones one line each; done: true shows \
 them in full too.
 - task_get(id?) — one task's card: what is to be done, the results and commits it builds on, its \
-reviewer, where it stands. Without an id, your task in progress.";
+reviewer, where it stands. Without an id, your task in progress.
+- memory_list() / memory_get(name) / memory_search(query) — the project memory (see Project \
+memory): every memory's gist, one in full, the ones matching words.
+- memory_add(name, description, kind, body) — remember something for later sessions: a name in \
+[a-z0-9-], one line for the gist, the kind (decision, convention, preference, fact, pitfall) and \
+a short body saying what and why. Your own memory of that name is replaced.";
 
 const TOOLS_WORKER: &str = "\
 - task_update(percent, message) — report progress on your current task at meaningful milestones.
@@ -336,7 +399,10 @@ another CLI, are the operator's call.
 - task_retry(id) — put a failed or blocked task back in the queue.
 - operator_ask(question, options?, asked_by?) — put a question to the human who started this team.
 - agent_compact(id?, keep?) — queue a compaction of a member's context window, or of your own.
-- session_complete(summary) — record the final report once every task is done.";
+- memory_forget(name) — drop a memory that is wrong or stale; memory_add under a name a member \
+used replaces theirs.
+- session_complete(summary) — record the final report once every task is done; crew remembers \
+it for the next session.";
 
 /// How the team's voice is written: the rules a model follows on the
 /// coordination channel. After caveman's skills
@@ -468,9 +534,10 @@ back to {parent}. You cannot launch subagents yourself."
     }
     let _ = write!(out, "\n## Team\n{}", roster(view, &me.id));
     out.push_str(&working_style(view));
+    out.push_str(&memory_section(view, &me.id, false));
     let selection = view.rules.crew_tools_of(&me.id);
-    let common = tool_lines(TOOLS_COMMON, selection);
-    let worker = tool_lines(TOOLS_WORKER, selection);
+    let common = tool_lines(TOOLS_COMMON, selection, view.memory.is_some());
+    let worker = tool_lines(TOOLS_WORKER, selection, true);
     let talking = match view.rules.messaging {
         Messaging::Open => "\
 Talk to teammates directly, as you would to a person; crew carries the words over:\n\
@@ -635,10 +702,11 @@ pub fn orchestrator_briefing(view: &TeamView<'_>) -> String {
     }
     let _ = write!(out, "\n## Team\n{}", roster(view, ORCHESTRATOR_ID));
     out.push_str(&working_style(view));
+    out.push_str(&memory_section(view, ORCHESTRATOR_ID, true));
     out.push_str(view.models);
     let selection = view.rules.crew_tools_of(ORCHESTRATOR_ID);
-    let common = tool_lines(TOOLS_COMMON, selection);
-    let mut orchestrator = tool_lines(TOOLS_ORCHESTRATOR, selection);
+    let common = tool_lines(TOOLS_COMMON, selection, view.memory.is_some());
+    let mut orchestrator = tool_lines(TOOLS_ORCHESTRATOR, selection, view.memory.is_some());
     if view.rules.workflow.is_some() && guardrails::crew_tool_allowed(selection, "workflow_run") {
         orchestrator.push('\n');
         orchestrator.push_str(TOOL_WORKFLOW);
@@ -1209,6 +1277,7 @@ mod tests {
                     vcs,
                     voice: Voice::default(),
                     rules: Rules::default(),
+                    memory: None,
                 },
                 &agents[1],
             )
@@ -1223,6 +1292,98 @@ mod tests {
         let git = briefing(crate::vcs::Kind::Git);
         assert!(git.contains("your own git worktree"), "{git}");
         assert!(!git.contains("jj"), "{git}");
+    }
+
+    #[test]
+    fn the_memory_is_briefed_and_its_tools_go_with_it() {
+        let agents = vec![
+            agent("orchestrator", "", true),
+            agent("claude-3", "ledger", false),
+        ];
+        let memories = vec![Memory {
+            name: "docs-host-quill".into(),
+            description: "Docs that leave the repo go to Quill".into(),
+            kind: crew_core::MemoryKind::Decision,
+            by: "operator".into(),
+            at: 1_791_700_000_000,
+            source: None,
+            body: "Chosen over Notion.".into(),
+        }];
+        let cut = vec![("claude-3".to_string(), vec!["messaging".to_string()])];
+        let view = |memory: Option<&[Memory]>, cut: &[(String, Vec<String>)]| {
+            worker_briefing(
+                &TeamView {
+                    project: "demo",
+                    objective: "Build it",
+                    style: None,
+                    instructions: "",
+                    models: "",
+                    agents: &agents,
+                    worktrees: true,
+                    vcs: crate::vcs::Kind::Git,
+                    voice: Voice::default(),
+                    rules: Rules {
+                        crew_tools: cut,
+                        ..Rules::default()
+                    },
+                    memory,
+                },
+                &agents[1],
+            )
+        };
+        let member = view(Some(&memories), &[]);
+        assert!(member.contains("## Project memory"), "{member}");
+        assert!(
+            member.contains(
+                "- docs-host-quill — Docs that leave the repo go to Quill (decision, operator, \
+2026-10-11)"
+            ),
+            "{member}"
+        );
+        assert!(
+            member.contains("The objective and a card may be terse")
+                && member.contains("- memory_add(name, description, kind, body)")
+                && member.contains("- memory_list() / memory_get(name) / memory_search(query)"),
+            "{member}"
+        );
+        // Nothing yet: said, with what to do about it.
+        let empty = view(Some(&[]), &[]);
+        assert!(
+            empty.contains("Nothing is remembered about this project yet. memory_add("),
+            "{empty}"
+        );
+        // A team that keeps no memory: no section, no tools.
+        let off = view(None, &[]);
+        assert!(
+            !off.contains("Project memory") && !off.contains("memory_get"),
+            "{off}"
+        );
+        // A member whose crew tools leave memory out reads it, and is not
+        // told to write.
+        let reader = view(Some(&memories), &cut);
+        assert!(
+            reader.contains("memory_get(name) reads one in full") && !reader.contains("memory_add"),
+            "{reader}"
+        );
+        let lead = orchestrator_briefing(&TeamView {
+            project: "demo",
+            objective: "Build it",
+            style: None,
+            instructions: "",
+            models: "",
+            agents: &agents,
+            worktrees: true,
+            vcs: crate::vcs::Kind::Git,
+            voice: Voice::default(),
+            rules: Rules::default(),
+            memory: Some(&memories),
+        });
+        assert!(
+            lead.contains("The objective may be terse")
+                && lead.contains("- memory_forget(name)")
+                && lead.contains("crew remembers it for the next session"),
+            "{lead}"
+        );
     }
 
     #[test]
@@ -1242,6 +1403,7 @@ mod tests {
             vcs: crate::vcs::Kind::Git,
             voice,
             rules: Rules::default(),
+            memory: None,
         };
         let member = worker_briefing(&view(Voice::default()), &agents[1]);
         assert!(
@@ -1296,6 +1458,7 @@ mod tests {
             vcs: crate::vcs::Kind::Git,
             voice: Voice::default(),
             rules: Rules::default(),
+            memory: None,
         };
         let text = worker_briefing(&view, &agents[1]);
         assert!(!text.contains("How this team works"));
@@ -1440,6 +1603,7 @@ mod tests {
                 crew_tools: &crew_tools,
                 pools: &[],
             },
+            memory: None,
         };
         let member = worker_briefing(&view, &agents[1]);
         assert!(
@@ -1506,6 +1670,7 @@ every completed card lands on the integration branch (agents/integration)"
         // With open messaging and no workflow, nothing of this appears.
         let plain = orchestrator_briefing(&TeamView {
             rules: Rules::default(),
+            memory: None,
             ..view
         });
         assert!(!plain.contains("workflow_run") && plain.contains("- task_create("));
@@ -1526,6 +1691,7 @@ every completed card lands on the integration branch (agents/integration)"
             vcs: crate::vcs::Kind::Git,
             voice: Voice::default(),
             rules: Rules::default(),
+            memory: None,
         });
         assert!(text.contains("must not act as a relay"));
         // The model catalog sits between the roster and the working rules.

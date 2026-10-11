@@ -620,6 +620,20 @@ change identity",
                 self.privileged(&who)?;
                 reply(self.assign_task(&id, &agent)?)
             }
+            Call::MemoryList => reply(self.memory_list()?),
+            Call::MemoryGet { name } => reply(self.memory_get(&name)?),
+            Call::MemorySearch { query, limit } => reply(self.memory_search(&query, limit)?),
+            Call::MemoryAdd {
+                name,
+                description,
+                kind,
+                body,
+                source,
+            } => reply(self.memory_add(&who, name, description, kind, body, source)?),
+            Call::MemoryForget { name } => {
+                self.privileged(&who)?;
+                reply(self.memory_forget(&who, &name)?)
+            }
             Call::TaskComplete {
                 task_id,
                 result,
@@ -671,6 +685,8 @@ change identity",
                 let decisions = self.check_decisions(&who, decisions)?;
                 self.model().session.summary = Some(summary.clone());
                 self.save_session();
+                // The next session reads how this one ended.
+                self.remember_session(&summary);
                 self.emit(NewEvent::new("orchestrator", "session.summary", summary));
                 let asked = self.ask_decisions(&who, decisions).await?;
                 Ok(json!({ "ok": true, "decisions": asked }))

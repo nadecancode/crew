@@ -37,6 +37,7 @@ mod guardrails;
 mod handlers;
 mod keepalive;
 mod limits;
+mod memory;
 mod orchestrate;
 mod overlap;
 mod policy;

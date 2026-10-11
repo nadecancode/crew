@@ -397,6 +397,7 @@ impl Member {
                 endpoint: &Endpoint::default(),
                 long_context: false,
                 private_home: None,
+                memory_dir: None,
             })
             .unwrap();
         if naive {

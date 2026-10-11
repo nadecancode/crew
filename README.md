@@ -412,9 +412,11 @@ by group or by name: `messaging` (agent_send, agent_broadcast), `git`,
 `review` (review_request, review_submit), `spawn` (agent_spawn), and for the
 orchestrator `staff` (agent_add, agent_remove, agent_set_model), `board`
 (task_create, task_edit, task_assign, task_retry) and `workflow`
-(workflow_run). Reading the board, one's own card and inbox, status and
-progress, finishing or giving up a card, declining, compacting, and the
-orchestrator's operator_ask and session_complete are never taken away. The
+(workflow_run); `memory` (memory_add) is writing to the
+[project memory](#project-memory). Reading the board, one's own card and
+inbox, the memory, status and progress, finishing or giving up a card,
+declining, compacting, and the orchestrator's operator_ask, memory_forget
+and session_complete are never taken away. The
 member's MCP server offers what it has and no other tool, and the daemon
 refuses the rest however it is asked (`crew ctl` included). A subagent gets
 its parent's cuts.
@@ -762,6 +764,8 @@ The orchestrator keeps each runtime's own guidance, since you read it.
 | `agent_spawn(task, role?)` | launch a subagent |
 | `agent_compact(keep?)` | compact your own context when the turn ends; the orchestrator may name a member (`id`) — see [Context windows](#context-windows) |
 | `agent_clear(note?)` | start your context afresh when the turn ends: a new session, nothing kept, your open card handed to it again; the orchestrator may name a member (`id`), never itself — see [Context windows](#context-windows) |
+| `memory_list()` / `memory_get(name)` / `memory_search(query)` | the [project memory](#project-memory): every memory's gist, one in full, the ones matching words |
+| `memory_add(name, description, kind, body)` | remember something for later sessions; `memory_forget(name)` is the orchestrator's |
 | `agent_add` / `agent_remove` / `task_create` / `task_edit` / `task_assign` / `task_retry` / `integrate` | orchestrator only |
 | `workflow_run(phase, title, brief)` | orchestrator only, in a team whose style declares a `workflow`: lay its chain of cards on the board for one unit of work (see [Guardrails](#guardrails)) |
 | `agent_set_model(id, model, note?)` | orchestrator only: put a member on another model its CLI runs; its session is restarted there, resumed, and reads the note first (see [Usage limits](#usage-limits)). The orchestrator's own model, and moving anyone to another CLI, are refused: they are [the operator's](#changing-model-and-cli) |
@@ -968,6 +972,60 @@ needed`.
 Claude Code's built-in ask-the-user dialog (`AskUserQuestion`) is switched off
 for crew's agents (a `deny` rule in the session's private settings): it would
 hold the agent at a prompt only `crew agent attach` could reach.
+
+## Project memory
+
+A project that has been worked on for a while has settled things its next
+objective does not say again: which document host was picked and why, that
+the mirror lives in `crew-integrations`, that main is never force-pushed,
+what the last session left unfinished. crew keeps those as the workspace's
+**memory**, and every member of every later session — on Claude Code, Codex
+or pi alike — reads the gist of it in its briefing before interpreting the
+objective or a card, so a terse instruction is read with the project's
+history in mind.
+
+- **What a memory is.** One markdown file under `.crew/memory/`, named
+  after the memory (`docs-host-quill.md`): a front matter block with its
+  `name`, one-line `description`, `kind` (`decision`, `convention`,
+  `preference`, `fact`, `pitfall`, or `session` for crew's own), who wrote
+  it (`by`), when (`at`) and where it came from (`source`), then a short
+  body saying what and why; `[[name]]` links another memory. The files are
+  the store: edit them, add one by hand, delete one, and the next briefing
+  reads them as they are. A team file can point `memory.dir` at a committed
+  folder for a memory that travels with the repository.
+- **Who writes it.** Four hands. Members and the orchestrator, with
+  `memory_add(name, description, kind, body)`, when they learn what a later
+  session would need. crew itself: every answer you give to a question the
+  team asked becomes a `decision` memory (that is exactly what a vague
+  objective leaves unsaid); `session_complete` writes a `session` memory
+  with the objective, the outcome and the team; and **every finished card
+  is distilled** — the model `memory.extract` names (`haiku` unless set;
+  `off` turns it off) reads the card, its result and its member's
+  transcript through Claude Code's print mode and answers with what a later
+  session could not get from the code or the commits, kept as crew's with
+  the card as `source`. Claude Code members' own memory: the directory is
+  their `autoMemoryDirectory`, so what a Claude member saves on its own
+  (its `type`, `modified` files) lands here too, read as a memory, instead
+  of in a per-worktree directory of its own or, for the orchestrator, in
+  your personal memory of the workspace. And you, with
+  `crew memory add|list|show|search|forget`.
+- **Who reads it.** Every briefing carries the newest `memory.brief` (50)
+  memories as `name — description (kind, by, date)`; `memory_get(name)`
+  reads one in full and `memory_search(words)` finds more. The
+  orchestrator's briefing says to interpret the objective with it and ask
+  you only where the memory is silent. crew also keeps `MEMORY.md` in the
+  directory — one line per memory, whoever wrote it — which is the index
+  Claude Code loads at the start of every session, so a Claude member has
+  the memory the native way as well.
+- **Limits.** A name is `[a-z0-9_-]` of at most 64 characters, the
+  description one line of at most 200, the body at most 4000, the memory at
+  most 500 memories; a note that looks like a credential (a key, a token, a
+  private key block) is refused, and so is replacing a memory someone else
+  wrote (the orchestrator and you may, and `memory_forget(name)` is theirs
+  alone). Writing is the `memory` crew-tools group, so a style can take it
+  from a member; reading never is. `memory.enabled: false` turns the whole
+  thing off. Every change is an event (`memory.added`, `memory.replaced`,
+  `memory.forgotten`) in the log.
 
 ## Web dashboard
 
@@ -1539,6 +1597,11 @@ limits:
   auto_resume: true           # resume agents paused at a usage limit by themselves
   limit_retry_secs: 1800      # … this often, when the runtime gave no reset time
   context_warn_percent: 75    # tell the orchestrator when a context window is this full (0: never)
+memory:                       # see "Project memory"
+  enabled: true
+  dir: .crew/memory           # relative to the workspace; a committed folder travels with the repo
+  brief: 50                   # how many memories (the newest) a briefing lists
+  extract: haiku              # the model that distils a finished card into memories (off: none)
 ```
 
 ## Endpoints and keys
