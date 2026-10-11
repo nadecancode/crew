@@ -123,6 +123,13 @@ impl AgentRuntime for CodexRuntime {
             "mcp_servers.crew.default_tools_approval_mode",
             json!("approve"),
         );
+        // Codex's own memory is the operator's, of every project on this
+        // machine, and it leaves out chats that use MCP anyway: the team's
+        // memory is crew's (`crate::memory`), briefed and distilled by
+        // crew. A member neither reads the operator's nor adds to it. (A
+        // Codex without the table ignores the keys.)
+        set("memories.use_memories", json!(false));
+        set("memories.generate_memories", json!(false));
         if let Some(toolbox) = toolbox {
             for name in &toolbox.servers {
                 // Toolbox names are validated bare identifiers. Codex's -c
@@ -535,6 +542,14 @@ mod tests {
         assert!(joined.contains("--sandbox workspace-write"));
         assert!(joined.contains("--ask-for-approval never"));
         assert!(spec.prompt_as_arg);
+        // Codex's own memory (the operator's, of every project) stays out
+        // of a member's session, both ways.
+        assert!(spec
+            .args
+            .contains(&"memories.use_memories=false".to_string()));
+        assert!(spec
+            .args
+            .contains(&"memories.generate_memories=false".to_string()));
         // The standing instructions are in the system prompt, and a member
         // writes for other models: Codex's guidance on writing for a person
         // gives way, in the team's voice.

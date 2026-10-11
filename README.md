@@ -1007,7 +1007,13 @@ history in mind.
   their `autoMemoryDirectory`, so what a Claude member saves on its own
   (its `type`, `modified` files) lands here too, read as a memory, instead
   of in a per-worktree directory of its own or, for the orchestrator, in
-  your personal memory of the workspace. And you, with
+  your personal memory of the workspace. Codex's own memory is per user
+  and machine, asynchronous, and leaves out chats that use MCP (every crew
+  member), so a Codex member runs with it off (`memories.use_memories`,
+  `memories.generate_memories`): it neither reads your memory of other
+  projects nor adds the team's work to it; pi has none of its own. Both
+  get the team's memory the same way as Claude members — the briefing,
+  the tools, and crew distilling their cards. And you, with
   `crew memory add|list|show|search|forget`.
 - **Who reads it.** Every briefing carries the newest `memory.brief` (50)
   memories as `name — description (kind, by, date)`; `memory_get(name)`
