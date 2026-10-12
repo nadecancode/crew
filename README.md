@@ -1003,8 +1003,13 @@ history in mind.
   `off` turns it off) reads the card, its result and its member's
   transcript through Claude Code's print mode and answers with what a later
   session could not get from the code or the commits, kept as crew's with
-  the card as `source`. Claude Code members' own memory: the directory is
-  their `autoMemoryDirectory`, so what a Claude member saves on its own
+  the card as `source`. A member you move to another CLI mid-card
+  (`crew agent model <id> --runtime codex`) leaves its transcript on the
+  CLI it came from, so crew distils its work so far the same way before
+  the move — its fresh session finds those memories with the tools, as the
+  handoff is not held for the model. Claude Code members' own memory: the
+  directory is their `autoMemoryDirectory`, so what a Claude member saves
+  on its own
   (its `type`, `modified` files) lands here too, read as a memory, instead
   of in a per-worktree directory of its own or, for the orchestrator, in
   your personal memory of the workspace. Codex's own memory is per user

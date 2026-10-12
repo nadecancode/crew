@@ -474,12 +474,13 @@ left off; if you were in the middle of a step, check its state before repeating 
                     crate::models::runtime_label(runtime)
                 ))
             })?;
-        // Read before anything changes.
-        let last_words = self
-            .agent_transcript(id, 200)
+        // Read before anything changes: the handoff quotes its end, and
+        // the rest is distilled into memory before it stays behind.
+        let transcript = self
+            .agent_transcript(id, super::memory::DISTILL_TRANSCRIPT_ENTRIES)
             .await
-            .map(|t| crate::agents::prompt::last_words(&t.entries))
             .unwrap_or_default();
+        let last_words = crate::agents::prompt::last_words(&transcript.entries);
         let describe = |runtime: RuntimeKind, model: Option<&str>| {
             let cli = crate::models::runtime_label(runtime);
             match model {
@@ -579,6 +580,7 @@ left off; if you were in the middle of a step, check its state before repeating 
             )
             .agent(id),
         );
+        self.distill_handoff(id, &from, &to, transcript);
         self.restart_agent_with(id, None).await
     }
 }

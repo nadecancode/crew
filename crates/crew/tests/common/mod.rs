@@ -74,6 +74,33 @@ pub fn scripted(steps: &[&str]) -> Vec<String> {
     argv
 }
 
+/// A CLI on PATH (`claude`, `codex`, `pi`) stood in for: records its
+/// arguments and environment next to the agent's identity file, then stays
+/// up until its stdin closes.
+pub const FAKE_RUNTIME: &str = r#"#!/bin/sh
+dir="${CREW_IDENTITY%/*}"
+: > "$dir/fake-args"
+for arg in "$@"; do printf '%s\n' "$arg" >> "$dir/fake-args"; done
+env > "$dir/fake-env"
+while read -r _; do :; done
+"#;
+
+/// A fake Codex session must also answer the launcher's configuration-only
+/// inventory calls, without recording a session, emitting hooks or showing
+/// a simulated model error. The shared CLI stand-in implements that protocol.
+pub fn runtime_script(name: &str, contents: &str) -> String {
+    if name != "codex" {
+        return contents.to_string();
+    }
+    let body = contents
+        .strip_prefix("#!/bin/sh\n")
+        .expect("shell runtime fixture");
+    format!(
+        "#!/bin/sh\ncrew_inventory_stage=0\nfor crew_inventory_arg in \"$@\"; do\n  case \"$crew_inventory_stage:$crew_inventory_arg\" in\n    0:mcp) crew_inventory_stage=1 ;;\n    1:list) crew_inventory_stage=2 ;;\n    2:--json) exec {} fake-cli codex \"$@\" ;;\n    *) crew_inventory_stage=0 ;;\n  esac\ndone\n{body}",
+        crew::agents::shell_quote(CREW)
+    )
+}
+
 pub fn agent(id: &str, role: &str, steps: &[&str]) -> AgentSpec {
     AgentSpec {
         id: id.to_string(),

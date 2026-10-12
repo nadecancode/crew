@@ -325,7 +325,7 @@ fn refresh_index(store: &MemoryStore) {
 }
 
 /// How much of a card and its member's transcript a distillation reads.
-const DISTILL_TRANSCRIPT_ENTRIES: usize = 200;
+pub(crate) const DISTILL_TRANSCRIPT_ENTRIES: usize = 200;
 const DISTILL_TRANSCRIPT_CHARS: usize = 40_000;
 const DISTILL_ENTRY_CHARS: usize = 1_500;
 const DISTILL_FIELD_CHARS: usize = 2_000;
@@ -351,7 +351,60 @@ struct Candidates {
     memories: Vec<Candidate>,
 }
 
+/// What a distillation reads: a finished card, or the work so far of a
+/// member moved to another CLI, whose transcript stays behind there.
+enum Distilled {
+    Card(Task),
+    Handoff {
+        task: Option<Task>,
+        from: String,
+        to: String,
+    },
+}
+
+impl Distilled {
+    fn task(&self) -> Option<&Task> {
+        match self {
+            Distilled::Card(task) => Some(task),
+            Distilled::Handoff { task, .. } => task.as_ref(),
+        }
+    }
+
+    /// For the events: what the memories came from.
+    fn origin(&self, author: &str) -> String {
+        match self {
+            Distilled::Card(task) => format!("card {}", task.id),
+            Distilled::Handoff {
+                task: Some(task),
+                to,
+                ..
+            } => format!(
+                "{author}'s work so far on card {}, before its move to {to}",
+                task.id
+            ),
+            Distilled::Handoff { task: None, to, .. } => {
+                format!("{author}'s session so far, before its move to {to}")
+            }
+        }
+    }
+}
+
 impl Daemon {
+    /// The model distillations run on: none when the team keeps no memory,
+    /// has `extract: off`, or Claude Code (whose print mode runs it) is not
+    /// installed.
+    fn distill_model(&self) -> Option<String> {
+        let config = self.memory_config();
+        if !config.enabled || config.extract.trim().eq_ignore_ascii_case("off") {
+            return None;
+        }
+        if crate::models::Availability::runtime(RuntimeKind::Claude).is_err() {
+            tracing::debug!("not distilling: Claude Code is not installed");
+            return None;
+        }
+        Some(config.extract)
+    }
+
     /// A finished card distilled into memories, in the background: what a
     /// later session could not get from the code, the commits or the card
     /// itself, read off the card and its member's transcript by the model
@@ -359,63 +412,107 @@ impl Daemon {
     /// a session's rollout once it has rested). Off with `extract: off`,
     /// and where Claude Code is not installed.
     pub(crate) fn distill_card(&self, task: Task, author: String) {
-        let config = self.memory_config();
-        if !config.enabled
-            || config.extract.trim().eq_ignore_ascii_case("off")
-            || task.result.as_deref().is_none_or(|r| r.trim().is_empty())
-        {
+        if task.result.as_deref().is_none_or(|r| r.trim().is_empty()) {
             return;
         }
-        if crate::models::Availability::runtime(RuntimeKind::Claude).is_err() {
-            tracing::debug!("not distilling {}: Claude Code is not installed", task.id);
+        let Some(model) = self.distill_model() else {
             return;
-        }
+        };
         let daemon = self.clone();
         tokio::spawn(async move {
-            daemon.distill_card_now(task, author, config.extract).await;
+            daemon
+                .distill_now(Distilled::Card(task), author, model, None)
+                .await;
         });
     }
 
-    async fn distill_card_now(&self, task: Task, author: String, model: String) {
+    /// A member moved from one CLI to another leaves its transcript on the
+    /// CLI it came from, where no later distillation reads it: its work so
+    /// far is distilled now, from `transcript` (read before the move), the
+    /// same way as a finished card — with the card it was on as the source,
+    /// when it was on one. Not held for: the fresh session finds the
+    /// memories with the tools.
+    pub(crate) fn distill_handoff(
+        &self,
+        id: &str,
+        from: &str,
+        to: &str,
+        transcript: TranscriptResult,
+    ) {
+        if transcript.entries.is_empty() {
+            return;
+        }
+        let Some(model) = self.distill_model() else {
+            return;
+        };
+        let task = self
+            .model()
+            .tasks
+            .iter()
+            .find(|t| t.assigned_agent.as_deref() == Some(id) && !t.status.is_terminal())
+            .cloned();
+        let subject = Distilled::Handoff {
+            task,
+            from: from.to_string(),
+            to: to.to_string(),
+        };
+        let (daemon, author) = (self.clone(), id.to_string());
+        tokio::spawn(async move {
+            daemon
+                .distill_now(subject, author, model, Some(transcript))
+                .await;
+        });
+    }
+
+    async fn distill_now(
+        &self,
+        subject: Distilled,
+        author: String,
+        model: String,
+        transcript: Option<TranscriptResult>,
+    ) {
         let Some(store) = self.memory_store() else {
             return;
         };
-        let transcript = self
-            .agent_transcript(&author, DISTILL_TRANSCRIPT_ENTRIES)
-            .await
-            .unwrap_or_default();
+        let transcript = match transcript {
+            Some(transcript) => transcript,
+            None => self
+                .agent_transcript(&author, DISTILL_TRANSCRIPT_ENTRIES)
+                .await
+                .unwrap_or_default(),
+        };
         let known = store.list().unwrap_or_default();
-        let prompt = distill_prompt(&task, &author, &transcript, &known);
+        let prompt = distill_prompt(&subject, &author, &transcript, &known);
+        let origin = subject.origin(&author);
+        let source = subject.task().map(|t| t.id.clone());
+        // On the card when there is one, else on the member.
+        let tag = |event: NewEvent| match &source {
+            Some(task) => event.task(task),
+            None => event.agent(&author),
+        };
         let answer = match self.run_claude_print(&model, &prompt).await {
             Ok(answer) => answer,
             Err(why) => {
-                self.emit(
-                    NewEvent::new(
-                        "daemon",
-                        "memory.distill_failed",
-                        format!("distilling card {} into memories: {why}", task.id),
-                    )
-                    .task(&task.id)
-                    .warn(),
-                );
+                self.emit(tag(NewEvent::new(
+                    "daemon",
+                    "memory.distill_failed",
+                    format!("distilling {origin} into memories: {why}"),
+                )
+                .warn()));
                 return;
             }
         };
         let candidates = match parse_candidates(&answer) {
             Ok(candidates) => candidates,
             Err(why) => {
-                self.emit(
-                    NewEvent::new(
-                        "daemon",
-                        "memory.distill_failed",
-                        format!(
-                            "distilling card {}: the model's answer was not the expected JSON ({why})",
-                            task.id
-                        ),
-                    )
-                    .task(&task.id)
-                    .warn(),
-                );
+                self.emit(tag(NewEvent::new(
+                    "daemon",
+                    "memory.distill_failed",
+                    format!(
+                        "distilling {origin}: the model's answer was not the expected JSON ({why})"
+                    ),
+                )
+                .warn()));
                 return;
             }
         };
@@ -433,7 +530,7 @@ impl Daemon {
                 kind,
                 by: CREW.to_string(),
                 at: now_ms(),
-                source: Some(task.id.clone()),
+                source: source.clone(),
                 body: candidate.body.trim().to_string(),
             };
             if let Err(why) = memory::check(&memory) {
@@ -465,21 +562,19 @@ impl Daemon {
             return;
         }
         for memory in &kept {
-            self.emit(
+            self.emit(tag(
                 NewEvent::new(
                     "daemon",
                     "memory.added",
                     format!(
-                        "crew distilled {} ({}) from card {}: {}",
+                        "crew distilled {} ({}) from {origin}: {}",
                         memory.name,
                         memory.kind,
-                        task.id,
                         truncate_chars(&memory.description, 160)
                     ),
                 )
-                .task(&task.id)
                 .data(json!({ "name": memory.name, "kind": memory.kind, "replaced": false, "distilled": true })),
-            );
+            ));
         }
     }
 
@@ -522,43 +617,70 @@ impl Daemon {
     }
 }
 
-/// The ask: the card, what is remembered already, the transcript, and the
-/// shape of the answer.
+/// The ask: the card (or the move), what is remembered already, the
+/// transcript, and the shape of the answer.
 fn distill_prompt(
-    task: &Task,
+    subject: &Distilled,
     author: &str,
     transcript: &TranscriptResult,
     known: &[Memory],
 ) -> String {
-    let field = |s: &str| truncate_chars(s.trim(), DISTILL_FIELD_CHARS);
-    let mut out = String::new();
-    out.push_str(
-        "You distil a finished card of a team of coding agents into memories for the team's later \
-sessions on this project. Keep only what a later session could not get from the code, the commits \
-or the card itself: a decision and why, a convention this project follows, a pitfall met (what \
+    const KEEP: &str =
+        "a decision and why, a convention this project follows, a pitfall met (what \
 went wrong, what to do instead), where something stands or lives, a preference of the operator's. \
 Not the narrative of the work, not what the diff says, never a secret, nothing already \
-remembered. Write 0 to 5 memories; none is a fine answer.\n\n",
-    );
-    out.push_str(&format!(
-        "Card {}: {}\nDone by: {author}\n",
-        task.id,
-        field(&task.title)
-    ));
-    if !task.description.trim().is_empty() {
-        out.push_str(&format!("Brief: {}\n", field(&task.description)));
+remembered. Write 0 to 5 memories; none is a fine answer.\n\n";
+    let field = |s: &str| truncate_chars(s.trim(), DISTILL_FIELD_CHARS);
+    let mut out = String::new();
+    match subject {
+        Distilled::Card(task) => {
+            out.push_str(
+                "You distil a finished card of a team of coding agents into memories for the team's \
+later sessions on this project. Keep only what a later session could not get from the code, the \
+commits or the card itself: ",
+            );
+            out.push_str(KEEP);
+            out.push_str(&format!(
+                "Card {}: {}\nDone by: {author}\n",
+                task.id,
+                field(&task.title)
+            ));
+        }
+        Distilled::Handoff { task, from, to } => {
+            out.push_str(&format!(
+                "You distil the work so far of {author}, one member of a team of coding agents, \
+which is being moved from {from} to {to}: its transcript stays behind on the CLI it leaves, so \
+what it learned on the way is kept now, for its fresh session there and for the team's later \
+sessions on this project. Keep only what they could not get from the code, the commits or the \
+card itself: "
+            ));
+            out.push_str(KEEP);
+            match task {
+                Some(task) => out.push_str(&format!(
+                    "Card {}: {} (in progress, handed over with the move)\nWorked on by: {author}\n",
+                    task.id,
+                    field(&task.title)
+                )),
+                None => out.push_str("On no card.\n"),
+            }
+        }
     }
-    if let Some(result) = &task.result {
-        out.push_str(&format!("Result: {}\n", field(result)));
-    }
-    let commits: Vec<&str> = task
-        .artifacts
-        .iter()
-        .filter(|a| a.kind == "commit")
-        .map(|a| a.value.as_str())
-        .collect();
-    if !commits.is_empty() {
-        out.push_str(&format!("Commits: {}\n", commits.join(", ")));
+    if let Some(task) = subject.task() {
+        if !task.description.trim().is_empty() {
+            out.push_str(&format!("Brief: {}\n", field(&task.description)));
+        }
+        if let Some(result) = &task.result {
+            out.push_str(&format!("Result: {}\n", field(result)));
+        }
+        let commits: Vec<&str> = task
+            .artifacts
+            .iter()
+            .filter(|a| a.kind == "commit")
+            .map(|a| a.value.as_str())
+            .collect();
+        if !commits.is_empty() {
+            out.push_str(&format!("Commits: {}\n", commits.join(", ")));
+        }
     }
     if !known.is_empty() {
         out.push_str("\nAlready remembered (do not repeat or restate):\n");
@@ -677,7 +799,7 @@ mod tests {
             available: true,
             truncated: false,
         };
-        let prompt = distill_prompt(&task, "a", &transcript, &[]);
+        let prompt = distill_prompt(&Distilled::Card(task.clone()), "a", &transcript, &[]);
         assert!(!prompt.contains("entry 0 "), "the start is cut");
         assert!(prompt.contains("entry 99 "), "the end is kept");
         assert!(
@@ -685,6 +807,35 @@ mod tests {
             "{}",
             prompt.len()
         );
-        assert!(prompt.contains("Card t: Title"));
+        assert!(prompt.contains("Card t: Title") && prompt.contains("Done by: a"));
+
+        // A move mid-card asks for the work so far instead, on the card
+        // being handed over, or on none.
+        let mut open = task;
+        open.status = crew_core::TaskStatus::Working;
+        open.result = None;
+        let moved = |task: Option<Task>| {
+            distill_prompt(
+                &Distilled::Handoff {
+                    task,
+                    from: "Claude Code on Fable 5.1".into(),
+                    to: "Codex on its default model".into(),
+                },
+                "a",
+                &transcript,
+                &[],
+            )
+        };
+        let prompt = moved(Some(open));
+        assert!(
+            prompt.contains(
+                "being moved from Claude Code on Fable 5.1 to Codex on its default model"
+            ) && prompt.contains("Card t: Title (in progress, handed over with the move)")
+                && prompt.contains("Worked on by: a")
+                && !prompt.contains("Result:")
+                && prompt.contains("entry 99 "),
+            "{prompt}"
+        );
+        assert!(moved(None).contains("On no card."));
     }
 }
